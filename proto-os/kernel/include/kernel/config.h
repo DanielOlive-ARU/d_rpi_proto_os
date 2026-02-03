@@ -1,0 +1,26 @@
+#ifndef KERNEL_CONFIG_H
+#define KERNEL_CONFIG_H
+
+#define KERNEL_LOAD_ADDR 0x40000000UL
+
+#ifndef DEBUG_TICK
+#define DEBUG_TICK 1
+#endif
+
+#ifndef DEBUG_EARLY
+#define DEBUG_EARLY 0
+#endif
+
+#if defined(KERNEL_FLAVOR_MONO)
+#define KERNEL_FLAVOR_STR "MONO"
+#elif defined(KERNEL_FLAVOR_MICRO)
+#define KERNEL_FLAVOR_STR "MICRO"
+#else
+#define KERNEL_FLAVOR_STR "MONO"
+#endif
+
+#define USER_VA_BASE  0x40000000UL
+#define USER_VA_SIZE  0x00200000UL
+#define USER_STACK_TOP 0x40020000UL
+
+#endif
