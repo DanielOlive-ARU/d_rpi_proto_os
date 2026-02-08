@@ -1,7 +1,8 @@
 #include "kernel/arch.h"
 #include "kernel/config.h"
-#include "kernel/printk.h"
 #include "kernel/drivers.h"
+#include "kernel/printk.h"
+#include "kernel/thread.h"
 
 static volatile uint64_t g_ticks = 0;
 static uint64_t g_tick_interval = 0;
@@ -35,6 +36,7 @@ void timer_handle_irq(void) {
   g_ticks++;
 
   write_cntv_tval(g_tick_interval);
+  thread_tick_irq();
 
 #if DEBUG_TICK
   if ((g_ticks % 1000) == 0) {

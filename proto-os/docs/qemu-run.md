@@ -10,11 +10,24 @@ make clean
 make build
 ```
 
+Or run a flavor build + launch in one command:
+
+```bash
+make mono-qemu
+make micro-qemu
+```
+
 Run without rebuilding:
 
 ```bash
 ./scripts/run_qemu.sh
 ```
+
+Expected runtime output includes:
+- boot banners
+- `[svc] ok` and `[svc] ticks ...`
+- `[tick] 1000` heartbeat
+- interleaved `A` / `B` markers from M4 scheduler threads
 
 Underlying QEMU command:
 

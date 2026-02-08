@@ -1,2 +1,10 @@
 # Auto detect text files and perform LF normalization
 * text=auto
+
+# Keep toolchain/runtime-critical files LF across Windows + WSL workflows.
+*.sh text eol=lf
+*.S text eol=lf
+*.c text eol=lf
+*.h text eol=lf
+*.ld text eol=lf
+Makefile text eol=lf

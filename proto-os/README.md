@@ -2,7 +2,7 @@
 
 Prototype AArch64 OS for a dissertation comparing monolithic and microkernel styles. Bring-up is QEMU AArch64 `virt` first, then Raspberry Pi 4.
 
-## Milestones (current: M0-M3)
+## Milestones (current: M0-M4)
 - M0: Boot to EL1, UART output.
 - M1: Exception vectors installed.
 - M2: 1ms timer IRQ heartbeat via GIC + generic timer.
@@ -10,8 +10,13 @@ Prototype AArch64 OS for a dissertation comparing monolithic and microkernel sty
   - `SYS_yield = 0`
   - `SYS_time_ticks = 1`
   - `SYS_write = 2`
+- M4: Minimal EL1 kernel threads and scheduler:
+  - context switch saves/restores `x19-x29`, `sp`, `lr`
+  - two runnable threads (`A`, `B`) plus idle thread
+  - 10-tick quantum driven by the existing 1ms timer
+  - deferred preemption (`timer IRQ` sets reschedule pending; switch happens at safe thread-context point)
 
-EL0/user mode, MMU mappings, scheduler, and IPC are staged for later milestones.
+EL0/user mode, MMU mappings, IPC, and full process model are staged for later milestones.
 
 ## Recommended build locations
 - WSL2: build/run from Linux home, usually `~/src/proto-os`.
@@ -39,12 +44,16 @@ Expected output includes:
 - `[svc] ok`
 - `[svc] ticks <value>`
 - `[tick] 1000` about once per second
+- interleaved `A` / `B` markers over time
 
-For microkernel flavor banner only (same behavior at M0-M3):
+For microkernel flavor banner:
 
 ```bash
 make micro-qemu
 ```
+
+Expected output is otherwise the same, with:
+- `[boot] proto-os (MICRO)`
 
 ## Debug
 ```bash
