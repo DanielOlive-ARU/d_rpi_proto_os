@@ -1,8 +1,8 @@
-# Design Notes (M0-M5)
+# Design Notes (M0-M5.1)
 
 ## Scope
-- Bring-up target is QEMU AArch64 `virt` for M0-M5.
-- Implemented path: boot -> UART -> vectors -> timer IRQ heartbeat -> minimal SVC syscall dispatch -> kernel threads with deferred preemption -> MMU identity mapping.
+- Bring-up target is QEMU AArch64 `virt` for M0-M5.1.
+- Implemented path: boot -> UART -> vectors -> timer IRQ heartbeat -> minimal SVC syscall dispatch -> kernel threads with deferred preemption -> MMU identity mapping -> caches on.
 - All execution remains EL1 for now (no EL0 transition yet).
 
 ## Build environment policy
@@ -38,11 +38,14 @@
 ## Memory mapping (current + future)
 - M5 enables MMU with identity mapping only; no higher-half kernel mapping.
 - Translation uses TTBR0-only in EL1 (`EPD1=1`), with 4KiB granule and 2MiB block mappings.
-- Mapped regions in M5:
+- Mapped regions in M5/M5.1:
   - Kernel RAM window starting at `0x40000000` (covers globals/stacks/page tables).
   - GIC MMIO block at `0x08000000`.
   - PL011 MMIO block at `0x09000000`.
-- Caches remain OFF in M5 (`SCTLR_EL1.C=0`, `SCTLR_EL1.I=0`) to reduce risk during initial MMU bring-up.
+- Cache policy in current M5.1:
+  - Normal memory is WB/WA cacheable (`MAIR_EL1` + `TCR_EL1.IRGN0/ORGN0`).
+  - Data and instruction caches are enabled (`SCTLR_EL1.C=1`, `SCTLR_EL1.I=1`).
+  - Device mappings/attributes remain unchanged.
 
 ## Fixed user VA plan (future)
 - User virtual address window: `0x40000000-0x40200000` (2MiB).

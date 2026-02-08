@@ -21,7 +21,7 @@
 #define DESC_UXN (1UL << 54)
 #define DESC_PXN (1UL << 53)
 
-#define MAIR_ATTR_NORMAL_NC 0x44UL
+#define MAIR_ATTR_NORMAL_WB_WA 0xFFUL
 #define MAIR_ATTR_DEVICE_NGNRE 0x00UL
 
 #define ATTR_IDX_NORMAL 0UL
@@ -31,8 +31,8 @@
 #define TCR_EPD1 (1UL << 23)
 #define TCR_TG0_4K (0UL << 14)
 #define TCR_SH0_INNER (3UL << 12)
-#define TCR_ORGN0_NC (0UL << 10)
-#define TCR_IRGN0_NC (0UL << 8)
+#define TCR_ORGN0_WB_WA (1UL << 10)
+#define TCR_IRGN0_WB_WA (1UL << 8)
 #define TCR_IPS_40BIT (2UL << 32)
 
 #define SCTLR_M (1UL << 0)
@@ -126,9 +126,12 @@ void mmu_init(void) {
   clear_tables();
   build_identity_map();
 
-  mair = (MAIR_ATTR_NORMAL_NC << (ATTR_IDX_NORMAL * 8)) |
+  /* Normal memory uses MAIR WB/WA; device attribute remains unchanged. */
+  mair = (MAIR_ATTR_NORMAL_WB_WA << (ATTR_IDX_NORMAL * 8)) |
          (MAIR_ATTR_DEVICE_NGNRE << (ATTR_IDX_DEVICE * 8));
-  tcr = TCR_T0SZ_39BIT | TCR_EPD1 | TCR_TG0_4K | TCR_SH0_INNER | TCR_ORGN0_NC | TCR_IRGN0_NC |
+  /* IRGN0/ORGN0 are WB/WA to match cacheable normal-memory attributes. */
+  tcr = TCR_T0SZ_39BIT | TCR_EPD1 | TCR_TG0_4K | TCR_SH0_INNER |
+        TCR_ORGN0_WB_WA | TCR_IRGN0_WB_WA |
         TCR_IPS_40BIT;
 
   asm volatile("msr mair_el1, %0" ::"r"(mair));
@@ -142,8 +145,11 @@ void mmu_init(void) {
   dsb_sy();
   isb();
 
-  sctlr |= SCTLR_M;
-  sctlr &= ~(SCTLR_C | SCTLR_I);
+  asm volatile("ic iallu");
+  dsb_sy();
+  isb();
+
+  sctlr |= (SCTLR_M | SCTLR_C | SCTLR_I);
   asm volatile("msr sctlr_el1, %0" ::"r"(sctlr));
   isb();
 }

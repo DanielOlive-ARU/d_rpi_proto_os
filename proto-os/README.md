@@ -2,7 +2,7 @@
 
 Prototype AArch64 OS for a dissertation comparing monolithic and microkernel styles. Bring-up is QEMU AArch64 `virt` first, then Raspberry Pi 4.
 
-## Milestones (current: M0-M5)
+## Milestones (current: M0-M5.1)
 - M0: Boot to EL1, UART output.
 - M1: Exception vectors installed.
 - M2: 1ms timer IRQ heartbeat via GIC + generic timer.
@@ -19,7 +19,10 @@ Prototype AArch64 OS for a dissertation comparing monolithic and microkernel sty
   - TTBR0-only translation (`EPD1=1`)
   - 4KiB granule with 2MiB block mappings
   - kernel + required MMIO mapped
-  - MMU on with caches off (`C=0`, `I=0`)
+- M5.1: Cache policy enabled on top of M5 mapping:
+  - normal memory set to cacheable WB/WA attributes
+  - `SCTLR_EL1.C=1` and `SCTLR_EL1.I=1`
+  - device mappings/attributes unchanged
 
 EL0/user mode, MMU mappings, IPC, and full process model are staged for later milestones.
 
@@ -49,6 +52,7 @@ Expected output includes:
 - `[svc] ok`
 - `[svc] ticks <value>`
 - `[mmu] enabled identity map`
+- `[mmu] caches on`
 - `[tick] 1000` about once per second
 - interleaved `A` / `B` markers over time
 
