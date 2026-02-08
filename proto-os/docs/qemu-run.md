@@ -26,6 +26,8 @@ Run without rebuilding:
 Expected runtime output includes:
 - boot banners
 - `[svc] ok` and `[svc] ticks ...`
+- `[mmu] enabled identity map`
+- `[mmu] caches on`
 - `[tick] 1000` heartbeat
 - interleaved `A` / `B` markers from M4 scheduler threads
 
