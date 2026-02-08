@@ -25,8 +25,8 @@ Prototype AArch64 OS for a dissertation comparing monolithic and microkernel sty
   - device mappings/attributes unchanged
 - M6: One-shot EL0 user-mode smoke test:
   - `eret` entry to EL0 and EL0 `SVC` handling in EL1
-  - `SYS_exit = 3` redirects exception return to an EL1 continuation
-  - EL0-only bounds checks for `SYS_write`
+  - `SYS_exit = 3` redirects exception return to a stable EL1 continuation target that resumes boot without relying on EL0 `x30`
+  - EL0-only bounds checks for `SYS_write` (overflow-safe range checks)
   - EL0 sandbox in the last 2MiB of the 16MiB identity map
 
 Full EL0 process model, per-process mappings, IPC, and service model are staged for later milestones.
@@ -58,8 +58,8 @@ Expected output includes:
 - `[svc] ticks <value>`
 - `[mmu] enabled identity map`
 - `[mmu] caches on`
-- `hello from el0`
-- `[el0] returned to el1`
+- `hello from el0` (exactly once)
+- `[el0] returned to el1` (exactly once)
 - `[tick] 1000` about once per second
 - interleaved `A` / `B` markers over time
 

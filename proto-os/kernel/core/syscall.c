@@ -21,7 +21,7 @@ static int el0_write_range_ok(const char *buf, uint64_t len) {
   start = (uintptr_t)buf;
 
   if (len == 0) {
-    return start >= EL0_SANDBOX_BASE && start <= sandbox_end;
+    return start >= EL0_SANDBOX_BASE && start < sandbox_end;
   }
 
   if (start < EL0_SANDBOX_BASE || start >= sandbox_end) {

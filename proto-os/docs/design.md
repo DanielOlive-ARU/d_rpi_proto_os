@@ -27,10 +27,12 @@
   - kernel sets `SP_EL0`, `ELR_EL1`, `SPSR_EL1` and executes `eret`
   - EL0 stub prints `hello from el0` via `SYS_write`
   - EL0 stub issues `SYS_exit` and returns to EL1 continuation (`[el0] returned to el1`)
+  - EL0 exit target uses an explicit function symbol (not compiler label-address extensions)
+  - EL1 continuation path is `noreturn` and resumes boot directly (`gic_init -> timer_init -> arch_enable_irq -> thread_start`) to avoid LR/x30 coupling to EL0 state
 - Exception return correctness:
   - sync vector restore path now reloads `ELR_EL1`/`SPSR_EL1` from trap frame before `eret`
   - IRQ path restore behavior is unchanged
-- `SYS_write` enforces pointer bounds only for EL0-origin syscalls.
+- `SYS_write` enforces pointer bounds only for EL0-origin syscalls, including strict zero-length bounds.
 
 ## M4 scheduler model (current)
 - Threads:
@@ -55,6 +57,7 @@
   - GIC MMIO block at `0x08000000`.
   - PL011 MMIO block at `0x09000000`.
 - M6 adds an EL0-accessible sandbox at `0x40E00000-0x41000000` (last 2MiB block of the 16MiB identity map).
+- EL0 sandbox normal-memory block is marked PXN; kernel normal-memory blocks are marked UXN.
 - The rest of kernel normal memory remains EL1-only.
 - Cache policy in current M5.1:
   - Normal memory is WB/WA cacheable (`MAIR_EL1` + `TCR_EL1.IRGN0/ORGN0`).

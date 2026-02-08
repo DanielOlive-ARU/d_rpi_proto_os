@@ -43,3 +43,5 @@ SECTIONS
   }
 
 }
+
+ASSERT(__el0_sandbox_end <= 0x41000000, "EL0 sandbox exceeds 2MiB block")

@@ -23,8 +23,10 @@
 #define KERNEL_FLAVOR_STR "MONO"
 #endif
 
+/* Future (inactive): user VA layout used once per-process TTBR0 mappings exist.
 #define USER_VA_BASE  0x40000000UL
 #define USER_VA_SIZE  0x00200000UL
 #define USER_STACK_TOP 0x40020000UL
+*/
 
 #endif

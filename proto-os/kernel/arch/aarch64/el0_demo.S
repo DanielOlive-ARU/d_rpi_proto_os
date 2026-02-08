@@ -18,7 +18,8 @@ el0_enter:
 
 __el0_demo_entry:
   adr x0, __el0_demo_msg
-  mov x1, #15
+  adr x1, __el0_demo_msg_end
+  sub x1, x1, x0
   mov x8, #SYS_WRITE_NR
   svc #0
 
@@ -31,6 +32,8 @@ __el0_demo_entry:
 .section .el0_sandbox.rodata, "a"
 .align 3
 .global __el0_demo_msg
+.global __el0_demo_msg_end
 
 __el0_demo_msg:
   .ascii "hello from el0\n"
+__el0_demo_msg_end:

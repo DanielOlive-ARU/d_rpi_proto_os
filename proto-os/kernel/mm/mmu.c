@@ -63,7 +63,9 @@ static inline uint64_t block_desc_normal(uint64_t pa, int el0_access) {
                   (ATTR_IDX_NORMAL << 2);
 
   if (el0_access) {
-    desc |= DESC_AP_EL0_RW;
+    desc |= DESC_AP_EL0_RW | DESC_PXN;
+  } else {
+    desc |= DESC_UXN;
   }
 
   return desc;
