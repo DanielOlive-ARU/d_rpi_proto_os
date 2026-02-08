@@ -211,13 +211,19 @@ void thread_tick_irq(void) {
 }
 
 void thread_resched_point(void) {
+  uint32_t pending;
   struct thread *next;
 
-  if (!g_resched_pending) {
+  /* Consume resched_pending atomically with IRQs masked in thread context. */
+  arch_disable_irq();
+  pending = g_resched_pending;
+  g_resched_pending = 0;
+  arch_enable_irq();
+
+  if (!pending) {
     return;
   }
 
-  g_resched_pending = 0;
   next = pick_next_thread();
   thread_switch_to(next);
 }
