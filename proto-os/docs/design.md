@@ -1,13 +1,29 @@
-# Design Notes (M0-M2)
+# Design Notes (M0-M3)
 
 ## Scope
-- M0-M2 bring-up is QEMU-only (AArch64 `virt`), focused on boot -> UART -> vectors -> timer IRQ heartbeat.
-- EL0/user space, syscalls, IPC, and MMU are placeholders only.
+- Bring-up target is QEMU AArch64 `virt` for M0-M3.
+- Implemented path: boot -> UART -> vectors -> timer IRQ heartbeat -> minimal SVC syscall dispatch.
+- All execution remains EL1 for now (no EL0 transition yet).
+
+## Build environment policy
+- Preferred development/build location on Windows hosts: WSL2 Linux filesystem (for example `~/src/proto-os`).
+- Avoid `/mnt/c/...` for regular builds when possible due slower file IO and inconsistent executable-bit behavior.
+- Raspberry Pi validation should be done with native Pi builds once hardware milestones are active.
+
+## M3 syscall ABI (current)
+- Trap source: `SVC #0`, handled by EL1 synchronous vector entry and C dispatch.
+- Syscall number register: `x8`.
+- Arguments: `x0`, `x1` (extended later as needed).
+- Return value: `x0`.
+- Implemented syscall numbers:
+  - `SYS_yield = 0`
+  - `SYS_time_ticks = 1` (returns `CNTVCT_EL0`)
+  - `SYS_write = 2` (writes raw buffer bytes to UART)
 
 ## Memory mapping (future)
 - Identity mapping only is planned initially; no higher-half kernel mapping.
 - Page size target: 4KiB.
-- MMU is OFF for M0-M2.
+- MMU is OFF for M0-M3.
 
 ## Fixed user VA plan (future)
 - User virtual address window: `0x40000000-0x40200000` (2MiB).

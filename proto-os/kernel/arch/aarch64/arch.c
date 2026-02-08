@@ -1,5 +1,6 @@
 #include "kernel/arch.h"
 #include "kernel/panic.h"
+#include "kernel/syscall.h"
 
 void arch_enable_irq(void) {
   asm volatile("msr daifclr, #2" ::: "memory");
@@ -10,7 +11,13 @@ void arch_disable_irq(void) {
 }
 
 void exception_sync_el1(struct trap_frame *tf) {
-  (void)tf;
+  uint64_t ec = (tf->esr >> 26) & 0x3Fu;
+
+  if (ec == 0x15u) {
+    tf->x[0] = syscall_dispatch(tf);
+    return;
+  }
+
   panic("EL1 sync exception");
 }
 
