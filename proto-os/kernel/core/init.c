@@ -3,6 +3,7 @@
 #include "kernel/drivers.h"
 #include "kernel/printk.h"
 #include "kernel/syscall.h"
+#include "kernel/thread.h"
 
 static uint64_t svc_call2(uint64_t nr, uint64_t arg0, uint64_t arg1) {
   register uint64_t x0 asm("x0") = arg0;
@@ -47,6 +48,8 @@ void kernel_main(void) {
   printk_u64(sample_ticks);
   uart_puts("\n");
 
+  thread_system_init();
+
   gic_init();
   timer_init();
 #if DEBUG_EARLY
@@ -54,6 +57,7 @@ void kernel_main(void) {
 #endif
 
   arch_enable_irq();
+  thread_start();
 
   for (;;) {
     asm volatile("wfi");

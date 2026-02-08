@@ -1,8 +1,8 @@
-# Design Notes (M0-M3)
+# Design Notes (M0-M4)
 
 ## Scope
-- Bring-up target is QEMU AArch64 `virt` for M0-M3.
-- Implemented path: boot -> UART -> vectors -> timer IRQ heartbeat -> minimal SVC syscall dispatch.
+- Bring-up target is QEMU AArch64 `virt` for M0-M4.
+- Implemented path: boot -> UART -> vectors -> timer IRQ heartbeat -> minimal SVC syscall dispatch -> kernel threads with deferred preemption.
 - All execution remains EL1 for now (no EL0 transition yet).
 
 ## Build environment policy
@@ -20,10 +20,25 @@
   - `SYS_time_ticks = 1` (returns `CNTVCT_EL0`)
   - `SYS_write = 2` (writes raw buffer bytes to UART)
 
+## M4 scheduler model (current)
+- Threads:
+  - `thread_a`: emits `A` marker roughly every 200 scheduler ticks.
+  - `thread_b`: emits `B` marker roughly every 200 scheduler ticks.
+  - `idle`: executes `WFI` when no runnable work is selected.
+- Time base:
+  - Existing generic timer remains at 1ms period.
+  - Scheduler quantum is 10 ticks.
+- Deferred preemption:
+  - Timer IRQ handler only updates quantum accounting and sets `resched_pending`.
+  - No `context_switch()` is performed in IRQ context.
+  - Actual switching occurs at explicit safe points in normal thread context.
+- Context switch ABI (AArch64):
+  - save/restore `x19-x29`, `sp`, `lr`.
+
 ## Memory mapping (future)
 - Identity mapping only is planned initially; no higher-half kernel mapping.
 - Page size target: 4KiB.
-- MMU is OFF for M0-M3.
+- MMU is OFF for M0-M4.
 
 ## Fixed user VA plan (future)
 - User virtual address window: `0x40000000-0x40200000` (2MiB).

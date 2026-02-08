@@ -7,6 +7,7 @@ OBJCOPY := $(CROSS)objcopy
 BUILD_DIR := build
 KERNEL_ELF := $(BUILD_DIR)/kernel.elf
 KERNEL_IMG := $(BUILD_DIR)/kernel8.img
+FLAVOR_STAMP := $(BUILD_DIR)/.flavor_$(KERNEL_FLAVOR)
 
 KERNEL_FLAVOR ?= MONO
 DEBUG_TICK ?= 1
@@ -34,11 +35,16 @@ OBJS := $(patsubst kernel/%.c,$(BUILD_DIR)/%.o,$(SRCS_C)) \
 
 build: $(KERNEL_ELF) $(KERNEL_IMG)
 
-$(BUILD_DIR)/%.o: kernel/%.c
+$(FLAVOR_STAMP):
+	@mkdir -p $(BUILD_DIR)
+	@rm -f $(BUILD_DIR)/.flavor_*
+	@touch $@
+
+$(BUILD_DIR)/%.o: kernel/%.c $(FLAVOR_STAMP)
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c $< -o $@
 
-$(BUILD_DIR)/%.o: kernel/%.S
+$(BUILD_DIR)/%.o: kernel/%.S $(FLAVOR_STAMP)
 	@mkdir -p $(dir $@)
 	$(CC) $(ASFLAGS) -c $< -o $@
 
