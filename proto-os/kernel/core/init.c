@@ -1,6 +1,7 @@
 #include "kernel/config.h"
 #include "kernel/arch.h"
 #include "kernel/drivers.h"
+#include "kernel/el0.h"
 #include "kernel/mmu.h"
 #include "kernel/printk.h"
 #include "kernel/syscall.h"
@@ -53,6 +54,7 @@ void kernel_main(void) {
   mmu_init();
   uart_puts("[mmu] enabled identity map\n");
   uart_puts("[mmu] caches on\n");
+  el0_demo_run_once();
 
   gic_init();
   timer_init();

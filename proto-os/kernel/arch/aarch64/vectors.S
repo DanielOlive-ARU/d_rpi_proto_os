@@ -95,6 +95,14 @@ vectors_init:
   add sp, sp, #FRAME_SIZE
 .endm
 
+.macro RESTORE_SYNC_CONTEXT
+  ldr x1, [sp, #256]
+  msr elr_el1, x1
+  ldr x1, [sp, #264]
+  msr spsr_el1, x1
+  RESTORE_CONTEXT
+.endm
+
 el1t_sync:
   b el1h_sync
 el1t_irq:
@@ -108,7 +116,7 @@ el1h_sync:
   SAVE_CONTEXT
   mov x0, sp
   bl exception_sync_el1
-  RESTORE_CONTEXT
+  RESTORE_SYNC_CONTEXT
   eret
 
 el1h_irq:
@@ -127,7 +135,7 @@ el0_sync:
   SAVE_CONTEXT
   mov x0, sp
   bl exception_sync_el0
-  RESTORE_CONTEXT
+  RESTORE_SYNC_CONTEXT
   eret
 
 el0_irq:

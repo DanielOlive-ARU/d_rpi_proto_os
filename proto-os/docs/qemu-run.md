@@ -28,6 +28,8 @@ Expected runtime output includes:
 - `[svc] ok` and `[svc] ticks ...`
 - `[mmu] enabled identity map`
 - `[mmu] caches on`
+- one-time `hello from el0`
+- one-time `[el0] returned to el1`
 - `[tick] 1000` heartbeat
 - interleaved `A` / `B` markers from M4 scheduler threads
 

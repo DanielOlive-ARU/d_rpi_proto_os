@@ -14,7 +14,7 @@ void exception_sync_el1(struct trap_frame *tf) {
   uint64_t ec = (tf->esr >> 26) & 0x3Fu;
 
   if (ec == 0x15u) {
-    tf->x[0] = syscall_dispatch(tf);
+    tf->x[0] = syscall_dispatch(tf, SYSCALL_ORIGIN_EL1);
     return;
   }
 
@@ -22,7 +22,13 @@ void exception_sync_el1(struct trap_frame *tf) {
 }
 
 void exception_sync_el0(struct trap_frame *tf) {
-  (void)tf;
+  uint64_t ec = (tf->esr >> 26) & 0x3Fu;
+
+  if (ec == 0x15u) {
+    tf->x[0] = syscall_dispatch(tf, SYSCALL_ORIGIN_EL0);
+    return;
+  }
+
   panic("EL0 sync exception");
 }
 

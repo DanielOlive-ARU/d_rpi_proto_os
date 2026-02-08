@@ -2,7 +2,7 @@
 
 Prototype AArch64 OS for a dissertation comparing monolithic and microkernel styles. Bring-up is QEMU AArch64 `virt` first, then Raspberry Pi 4.
 
-## Milestones (current: M0-M5.1)
+## Milestones (current: M0-M6)
 - M0: Boot to EL1, UART output.
 - M1: Exception vectors installed.
 - M2: 1ms timer IRQ heartbeat via GIC + generic timer.
@@ -23,8 +23,13 @@ Prototype AArch64 OS for a dissertation comparing monolithic and microkernel sty
   - normal memory set to cacheable WB/WA attributes
   - `SCTLR_EL1.C=1` and `SCTLR_EL1.I=1`
   - device mappings/attributes unchanged
+- M6: One-shot EL0 user-mode smoke test:
+  - `eret` entry to EL0 and EL0 `SVC` handling in EL1
+  - `SYS_exit = 3` redirects exception return to an EL1 continuation
+  - EL0-only bounds checks for `SYS_write`
+  - EL0 sandbox in the last 2MiB of the 16MiB identity map
 
-EL0/user mode, MMU mappings, IPC, and full process model are staged for later milestones.
+Full EL0 process model, per-process mappings, IPC, and service model are staged for later milestones.
 
 ## Recommended build locations
 - WSL2: build/run from Linux home, usually `~/src/proto-os`.
@@ -53,6 +58,8 @@ Expected output includes:
 - `[svc] ticks <value>`
 - `[mmu] enabled identity map`
 - `[mmu] caches on`
+- `hello from el0`
+- `[el0] returned to el1`
 - `[tick] 1000` about once per second
 - interleaved `A` / `B` markers over time
 
