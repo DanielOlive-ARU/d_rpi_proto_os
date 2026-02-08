@@ -2,7 +2,7 @@
 
 Prototype AArch64 OS for a dissertation comparing monolithic and microkernel styles. Bring-up is QEMU AArch64 `virt` first, then Raspberry Pi 4.
 
-## Milestones (current: M0-M4)
+## Milestones (current: M0-M5)
 - M0: Boot to EL1, UART output.
 - M1: Exception vectors installed.
 - M2: 1ms timer IRQ heartbeat via GIC + generic timer.
@@ -15,6 +15,11 @@ Prototype AArch64 OS for a dissertation comparing monolithic and microkernel sty
   - two runnable threads (`A`, `B`) plus idle thread
   - 10-tick quantum driven by the existing 1ms timer
   - deferred preemption (`timer IRQ` sets reschedule pending; switch happens at safe thread-context point)
+- M5: MMU enabled with identity kernel mapping:
+  - TTBR0-only translation (`EPD1=1`)
+  - 4KiB granule with 2MiB block mappings
+  - kernel + required MMIO mapped
+  - MMU on with caches off (`C=0`, `I=0`)
 
 EL0/user mode, MMU mappings, IPC, and full process model are staged for later milestones.
 
@@ -43,6 +48,7 @@ Expected output includes:
 - `[boot] proto-os (MONO)`
 - `[svc] ok`
 - `[svc] ticks <value>`
+- `[mmu] enabled identity map`
 - `[tick] 1000` about once per second
 - interleaved `A` / `B` markers over time
 
