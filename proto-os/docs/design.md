@@ -1,9 +1,9 @@
-# Design Notes (M0-M5.1)
+# Design Notes (M0-M6)
 
 ## Scope
-- Bring-up target is QEMU AArch64 `virt` for M0-M5.1.
-- Implemented path: boot -> UART -> vectors -> timer IRQ heartbeat -> minimal SVC syscall dispatch -> kernel threads with deferred preemption -> MMU identity mapping -> caches on.
-- All execution remains EL1 for now (no EL0 transition yet).
+- Bring-up target is QEMU AArch64 `virt` for M0-M6.
+- Implemented path: boot -> UART -> vectors -> timer IRQ heartbeat -> minimal SVC syscall dispatch -> kernel threads with deferred preemption -> MMU identity mapping -> caches on -> one-shot EL0 demo.
+- Runtime scheduler execution remains EL1; M6 adds a controlled one-shot EL0 transition and return.
 
 ## Build environment policy
 - Preferred development/build location on Windows hosts: WSL2 Linux filesystem (for example `~/src/proto-os`).
@@ -19,6 +19,20 @@
   - `SYS_yield = 0`
   - `SYS_time_ticks = 1` (returns `CNTVCT_EL0`)
   - `SYS_write = 2` (writes raw buffer bytes to UART)
+  - `SYS_exit = 3` (M6 semantics: EL0 demo exit back to EL1 continuation)
+
+## M6 EL0 smoke test (current)
+- A one-shot EL0 demo runs before `gic_init()/timer_init()/thread_start()`.
+- EL0 path:
+  - kernel sets `SP_EL0`, `ELR_EL1`, `SPSR_EL1` and executes `eret`
+  - EL0 stub prints `hello from el0` via `SYS_write`
+  - EL0 stub issues `SYS_exit` and returns to EL1 continuation (`[el0] returned to el1`)
+  - EL0 exit target uses an explicit function symbol (not compiler label-address extensions)
+  - EL1 continuation path is `noreturn` and resumes boot directly (`gic_init -> timer_init -> arch_enable_irq -> thread_start`) to avoid LR/x30 coupling to EL0 state
+- Exception return correctness:
+  - sync vector restore path now reloads `ELR_EL1`/`SPSR_EL1` from trap frame before `eret`
+  - IRQ path restore behavior is unchanged
+- `SYS_write` enforces pointer bounds only for EL0-origin syscalls, including strict zero-length bounds.
 
 ## M4 scheduler model (current)
 - Threads:
@@ -42,6 +56,9 @@
   - Kernel RAM window starting at `0x40000000` (covers globals/stacks/page tables).
   - GIC MMIO block at `0x08000000`.
   - PL011 MMIO block at `0x09000000`.
+- M6 adds an EL0-accessible sandbox at `0x40E00000-0x41000000` (last 2MiB block of the 16MiB identity map).
+- EL0 sandbox normal-memory block is marked PXN; kernel normal-memory blocks are marked UXN.
+- The rest of kernel normal memory remains EL1-only.
 - Cache policy in current M5.1:
   - Normal memory is WB/WA cacheable (`MAIR_EL1` + `TCR_EL1.IRGN0/ORGN0`).
   - Data and instruction caches are enabled (`SCTLR_EL1.C=1`, `SCTLR_EL1.I=1`).

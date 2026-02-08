@@ -9,7 +9,7 @@
 #define MMU_L2_BLOCK_SIZE (1UL << MMU_L2_BLOCK_SHIFT)
 
 #define KERNEL_MAP_BASE KERNEL_LOAD_ADDR
-#define KERNEL_MAP_SIZE 0x01000000UL
+#define KERNEL_MAP_SIZE KERNEL_IDMAP_SIZE
 
 #define GIC_MAP_BASE 0x08000000UL
 #define PL011_MAP_BASE 0x09000000UL
@@ -18,6 +18,7 @@
 #define DESC_TABLE (1UL << 1)
 #define DESC_AF (1UL << 10)
 #define DESC_SH_INNER (3UL << 8)
+#define DESC_AP_EL0_RW (1UL << 6)
 #define DESC_UXN (1UL << 54)
 #define DESC_PXN (1UL << 53)
 
@@ -57,9 +58,17 @@ static inline uint64_t table_desc(uint64_t pa) {
   return (pa & ~((1UL << MMU_PAGE_SHIFT) - 1UL)) | DESC_VALID | DESC_TABLE;
 }
 
-static inline uint64_t block_desc_normal(uint64_t pa) {
-  return (pa & ~(MMU_L2_BLOCK_SIZE - 1UL)) | DESC_VALID | DESC_AF | DESC_SH_INNER |
-         (ATTR_IDX_NORMAL << 2);
+static inline uint64_t block_desc_normal(uint64_t pa, int el0_access) {
+  uint64_t desc = (pa & ~(MMU_L2_BLOCK_SIZE - 1UL)) | DESC_VALID | DESC_AF | DESC_SH_INNER |
+                  (ATTR_IDX_NORMAL << 2);
+
+  if (el0_access) {
+    desc |= DESC_AP_EL0_RW | DESC_PXN;
+  } else {
+    desc |= DESC_UXN;
+  }
+
+  return desc;
 }
 
 static inline uint64_t block_desc_device(uint64_t pa) {
@@ -76,9 +85,13 @@ static void clear_tables(void) {
   }
 }
 
-static void map_2m_block(uint64_t *l2_table, uint64_t va, uint64_t pa, int is_device) {
+static void map_2m_block(uint64_t *l2_table,
+                         uint64_t va,
+                         uint64_t pa,
+                         int is_device,
+                         int el0_access) {
   uint64_t idx = l2_index(va);
-  l2_table[idx] = is_device ? block_desc_device(pa) : block_desc_normal(pa);
+  l2_table[idx] = is_device ? block_desc_device(pa) : block_desc_normal(pa, el0_access);
 }
 
 static void build_identity_map(void) {
@@ -87,14 +100,17 @@ static void build_identity_map(void) {
   g_l1_table[l1_index(GIC_MAP_BASE)] = table_desc((uint64_t)(uintptr_t)g_l2_low_table);
   g_l1_table[l1_index(KERNEL_MAP_BASE)] = table_desc((uint64_t)(uintptr_t)g_l2_kernel_table);
 
-  map_2m_block(g_l2_low_table, GIC_MAP_BASE, GIC_MAP_BASE, 1);
-  map_2m_block(g_l2_low_table, PL011_MAP_BASE, PL011_MAP_BASE, 1);
+  map_2m_block(g_l2_low_table, GIC_MAP_BASE, GIC_MAP_BASE, 1, 0);
+  map_2m_block(g_l2_low_table, PL011_MAP_BASE, PL011_MAP_BASE, 1, 0);
 
   for (offset = 0; offset < KERNEL_MAP_SIZE; offset += MMU_L2_BLOCK_SIZE) {
+    uint64_t va = KERNEL_MAP_BASE + offset;
+    int el0_access = (va >= EL0_SANDBOX_BASE && va < EL0_SANDBOX_END);
     map_2m_block(g_l2_kernel_table,
-                 KERNEL_MAP_BASE + offset,
-                 KERNEL_MAP_BASE + offset,
-                 0);
+                 va,
+                 va,
+                 0,
+                 el0_access);
   }
 }
 

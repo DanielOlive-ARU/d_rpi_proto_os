@@ -2,6 +2,10 @@
 #define KERNEL_CONFIG_H
 
 #define KERNEL_LOAD_ADDR 0x40000000UL
+#define KERNEL_IDMAP_SIZE 0x01000000UL
+#define EL0_SANDBOX_SIZE 0x00200000UL
+#define EL0_SANDBOX_BASE (KERNEL_LOAD_ADDR + KERNEL_IDMAP_SIZE - EL0_SANDBOX_SIZE)
+#define EL0_SANDBOX_END (EL0_SANDBOX_BASE + EL0_SANDBOX_SIZE)
 
 #ifndef DEBUG_TICK
 #define DEBUG_TICK 1
@@ -19,8 +23,10 @@
 #define KERNEL_FLAVOR_STR "MONO"
 #endif
 
+/* Future (inactive): user VA layout used once per-process TTBR0 mappings exist.
 #define USER_VA_BASE  0x40000000UL
 #define USER_VA_SIZE  0x00200000UL
 #define USER_STACK_TOP 0x40020000UL
+*/
 
 #endif

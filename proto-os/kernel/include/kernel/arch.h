@@ -3,6 +3,9 @@
 
 #include "kernel/types.h"
 
+#define SPSR_EL0T_MASKED 0x3C0UL
+#define SPSR_EL1H_MASKED 0x3C5UL
+
 struct trap_frame {
   uint64_t x[31];
   uint64_t sp;
