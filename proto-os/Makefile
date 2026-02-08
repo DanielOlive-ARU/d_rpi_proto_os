@@ -48,12 +48,12 @@ $(KERNEL_ELF): $(OBJS) kernel/arch/aarch64/linker.ld
 $(KERNEL_IMG): $(KERNEL_ELF)
 	$(OBJCOPY) -O binary $< $@
 
-mono-qemu: KERNEL_FLAVOR=MONO
-mono-qemu: build
+mono-qemu:
+	$(MAKE) KERNEL_FLAVOR=MONO build
 	./scripts/run_qemu.sh
 
-micro-qemu: KERNEL_FLAVOR=MICRO
-micro-qemu: build
+micro-qemu:
+	$(MAKE) KERNEL_FLAVOR=MICRO build
 	./scripts/run_qemu.sh
 
 clean:
