@@ -13,7 +13,10 @@ enum {
   SYS_yield = 0,
   SYS_time_ticks = 1,
   SYS_write = 2,
-  SYS_exit = 3
+  SYS_exit = 3,
+  SYS_ipc_call = 4,
+  SYS_ipc_recv = 5,
+  SYS_ipc_reply = 6
 };
 
 uint64_t syscall_dispatch(struct trap_frame *tf, enum syscall_origin origin);

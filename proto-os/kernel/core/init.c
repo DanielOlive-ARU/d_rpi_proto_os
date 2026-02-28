@@ -1,6 +1,7 @@
 #include "kernel/config.h"
 #include "kernel/arch.h"
 #include "kernel/drivers.h"
+#include "kernel/ipc.h"
 #include "kernel/mmu.h"
 #include "kernel/panic.h"
 #include "kernel/printk.h"
@@ -51,6 +52,7 @@ void kernel_main(void) {
   uart_puts("\n");
 
   thread_system_init();
+  ipc_init();
   mmu_init();
   uart_puts("[mmu] enabled identity map\n");
   uart_puts("[mmu] caches on\n");

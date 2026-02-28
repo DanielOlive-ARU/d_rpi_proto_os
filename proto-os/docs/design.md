@@ -1,9 +1,9 @@
-# Design Notes (M0-M7)
+# Design Notes (M0-M8)
 
 ## Scope
-- Bring-up target is QEMU AArch64 `virt` for M0-M7.
-- Implemented path: boot -> UART -> vectors -> timer IRQ heartbeat -> minimal SVC dispatch -> deferred scheduler -> MMU identity map -> caches on -> persistent EL0 tasks.
-- MONO/MICRO behavior is identical in M7 except boot banner.
+- Bring-up target is QEMU AArch64 `virt` for M0-M8.
+- Implemented path: boot -> UART -> vectors -> timer IRQ heartbeat -> minimal SVC dispatch -> deferred scheduler -> MMU identity map -> caches on -> persistent EL0 tasks -> synchronous IPC baseline.
+- MONO/MICRO behavior remains identical in M8 except boot banner.
 
 ## Build environment policy
 - Preferred build location on Windows hosts: WSL2 Linux filesystem (for example `~/src/proto-os`).
@@ -12,30 +12,36 @@
 
 ## Syscall ABI (current)
 - Trap source: `SVC #0`, handled by EL1 synchronous vector entry and C dispatch.
-- Number in `x8`, args in `x0/x1`, return in `x0`.
+- Number in `x8`, args in `x0..x4` depending on syscall, return in `x0`.
 - Implemented syscall numbers:
   - `SYS_yield = 0`
   - `SYS_time_ticks = 1`
   - `SYS_write = 2`
   - `SYS_exit = 3`
+  - `SYS_ipc_call = 4`
+  - `SYS_ipc_recv = 5`
+  - `SYS_ipc_reply = 6`
 - EL0-only bounds checks are enforced for `SYS_write` (overflow-safe, strict zero-length check).
+- IPC buffers use the same EL0 sandbox bounds-checking model.
 
-## Scheduler and EL0 task model (current M7)
+## Scheduler and EL0 task model (current M8)
 - Existing EL1 scheduler/context-switch core is retained.
 - Deferred preemption remains unchanged:
   - timer IRQ updates tick/quantum and sets reschedule pending
   - no context switch in IRQ or SVC paths
   - switching occurs only at safe thread-context points
-- Two persistent EL0 tasks now back the A/B markers:
-  - `task_a` prints `A` every ~200 ticks, then `SYS_yield`
-  - `task_b` prints `B` every ~200 ticks, then `SYS_yield`
+- Two persistent EL0 tasks now exercise baseline IPC:
+  - `task_a` (client) performs `SYS_ipc_call(EP_ECHO, ...)`, prints `A`, then yields
+  - `task_b` (server) performs `SYS_ipc_recv(EP_ECHO, ...)`, prints `B`, replies, then yields
 - Idle thread/path remains in EL1 and uses `WFI`.
-- Task states include `TASK_RUNNABLE`, `TASK_RUNNING`, `TASK_BLOCKED`, `TASK_DEAD` (`TASK_BLOCKED` is reserved, unused in M7).
+- Task states include `TASK_RUNNABLE`, `TASK_RUNNING`, `TASK_BLOCKED`, `TASK_DEAD`.
+- `TASK_BLOCKED` is active for blocking IPC paths (`ipc_call`, `ipc_recv` slow path).
 - EL0 synchronous non-SVC faults kill the current EL0 task and log a compact one-line fault message.
 
 ## EL1 <-> EL0 return mechanics (current)
 - Sync vectors restore `ELR_EL1` and `SPSR_EL1` from trap frame before `eret`.
 - Yield/exit/fault redirection rewrites trap-frame `ELR/SPSR` to a shared EL1 continuation function.
+- IPC blocking paths reuse the same redirection mechanism with `TASK_RETURN_IPC_BLOCK`.
 - Continuation runs in normal thread context, reaches scheduler safe points, then resumes EL0 via saved user context.
 - EL0 resume path masks IRQ while programming `ELR_EL1/SPSR_EL1` to avoid race-clobber before `eret`.
 
@@ -60,13 +66,22 @@
 - User stack top: `0x40020000` (downward growth).
 - User apps remain planned as flat, position-dependent images initially.
 
-## IPC plan (future)
-- Synchronous call/reply, fixed 256-byte messages, kernel copy.
-- Static endpoints:
-  - `EP_ECHO = 1`
+## IPC baseline (current M8)
+- Model: synchronous call/reply with fixed-size kernel-copy messages (`IPC_MSG_SIZE=256`).
+- Endpoint table is static in-kernel.
+- Active endpoint:
+  - `EP_ECHO = 1` owned by `task_b`
+- Per-endpoint state is intentionally minimal:
+  - one pending request slot
+  - one blocked caller awaiting reply
+  - one blocked receiver awaiting request
+- No capabilities, dynamic registration, or deep queues in M8.
+
+## IPC roadmap (future)
+- Add static endpoints for UART/supervisor service split:
   - `EP_UART = 2`
   - `EP_SUPERVISOR = 3`
-- Owner/pid model to be added in later milestones.
+- Add owner/pid policy and capability model in later milestones.
 
 ## Fault policy roadmap
 - EL1 faults: panic and print ESR/FAR/ELR/SPSR.

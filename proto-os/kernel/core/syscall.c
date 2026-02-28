@@ -1,5 +1,6 @@
 #include "kernel/config.h"
 #include "kernel/drivers.h"
+#include "kernel/ipc.h"
 #include "kernel/syscall.h"
 #include "kernel/thread.h"
 
@@ -63,6 +64,21 @@ uint64_t syscall_dispatch(struct trap_frame *tf, enum syscall_origin origin) {
       }
       thread_user_trap_redirect(tf, TASK_RETURN_EXIT);
       return 0;
+    case SYS_ipc_call:
+      if (origin != SYSCALL_ORIGIN_EL0) {
+        return (uint64_t)-1;
+      }
+      return ipc_syscall_call(tf);
+    case SYS_ipc_recv:
+      if (origin != SYSCALL_ORIGIN_EL0) {
+        return (uint64_t)-1;
+      }
+      return ipc_syscall_recv(tf);
+    case SYS_ipc_reply:
+      if (origin != SYSCALL_ORIGIN_EL0) {
+        return (uint64_t)-1;
+      }
+      return ipc_syscall_reply(tf);
     default:
       return (uint64_t)-1;
   }
