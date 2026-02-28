@@ -6,10 +6,6 @@
 #include "kernel/printk.h"
 #include "kernel/thread.h"
 
-#define THREAD_COUNT 3U
-#define THREAD_SLOT_TASK_A 0U
-#define THREAD_SLOT_TASK_B 1U
-#define THREAD_SLOT_IDLE 2U
 #define THREAD_STACK_SIZE 4096U
 
 extern char __el0_task_a_stack_bottom;
@@ -37,7 +33,6 @@ static void thread_entry_idle(void *arg);
 static void thread_bootstrap(void);
 extern void user_task_return_to_kernel(void);
 __attribute__((noinline)) void user_task_return_step(void);
-struct user_task_ctx *thread_current_user_ctx(void);
 
 static inline uint64_t stack_top(uint8_t *stack, uint64_t size) {
   uintptr_t top = (uintptr_t)(stack + size);
@@ -51,7 +46,8 @@ static int thread_is_selectable(const struct thread *t) {
   if (t->state != THREAD_RUNNABLE && t->state != THREAD_RUNNING) {
     return 0;
   }
-  if (t->kind == THREAD_USER_TASK && t->user.state == TASK_DEAD) {
+  if (t->kind == THREAD_USER_TASK &&
+      (t->user.state == TASK_DEAD || t->user.state == TASK_BLOCKED)) {
     return 0;
   }
   return 1;
@@ -242,6 +238,9 @@ __attribute__((noinline)) void user_task_return_step(void) {
   if (t->user.return_reason == TASK_RETURN_YIELD) {
     t->user.state = TASK_RUNNABLE;
     t->state = THREAD_RUNNABLE;
+  } else if (t->user.return_reason == TASK_RETURN_IPC_BLOCK) {
+    t->user.state = TASK_BLOCKED;
+    t->state = THREAD_RUNNABLE;
   } else if (t->user.return_reason == TASK_RETURN_EXIT ||
              t->user.return_reason == TASK_RETURN_FAULT) {
     if (t->user.return_reason == TASK_RETURN_EXIT) {
@@ -265,7 +264,9 @@ __attribute__((noinline)) void user_task_return_step(void) {
   if (g_current != t || t->kind != THREAD_USER_TASK) {
     panic("resumed user continuation on non-user thread");
   }
-  if (t->state == THREAD_STOPPED || t->user.state == TASK_DEAD) {
+  if (t->state == THREAD_STOPPED ||
+      t->user.state == TASK_DEAD ||
+      t->user.state == TASK_BLOCKED) {
     panic("dead user task resumed");
   }
 
@@ -273,6 +274,15 @@ __attribute__((noinline)) void user_task_return_step(void) {
   t->user.state = TASK_RUNNING;
   t->user.return_reason = TASK_RETURN_NONE;
   g_current_task = t;
+}
+
+uint32_t thread_current_user_slot(void) {
+  struct thread *t = g_current_task;
+
+  if (!t || t != g_current || t->kind != THREAD_USER_TASK) {
+    panic("invalid current user task");
+  }
+  return t->slot;
 }
 
 struct user_task_ctx *thread_current_user_ctx(void) {
@@ -293,6 +303,30 @@ struct user_task_ctx *thread_current_user_ctx(void) {
     panic("user resume ELR outside sandbox");
   }
   return &t->user.ctx;
+}
+
+void thread_user_wake_with_x0(uint32_t slot, uint64_t retval) {
+  struct thread *t;
+
+  if (slot >= THREAD_COUNT) {
+    panic("wake slot out of range");
+  }
+
+  t = &g_threads[slot];
+  if (t->kind != THREAD_USER_TASK) {
+    panic("wake target is not user task");
+  }
+  if (t->state == THREAD_STOPPED || t->user.state == TASK_DEAD) {
+    panic("wake target is dead");
+  }
+
+  t->user.ctx.x[0] = retval;
+  t->user.state = TASK_RUNNABLE;
+  t->state = THREAD_RUNNABLE;
+}
+
+void thread_request_resched(void) {
+  g_resched_pending = 1;
 }
 
 static void thread_entry_idle(void *arg) {

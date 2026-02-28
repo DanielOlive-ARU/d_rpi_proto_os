@@ -29,7 +29,7 @@ Expected runtime output includes:
 - `[mmu] enabled identity map`
 - `[mmu] caches on`
 - `[tick] 1000` heartbeat
-- interleaved `A` / `B` markers from persistent EL0 tasks
+- recurring `A` / `B` markers from EL0 IPC client/server loops (`EP_ECHO`)
 
 Underlying QEMU command:
 

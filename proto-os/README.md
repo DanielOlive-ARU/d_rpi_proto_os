@@ -2,7 +2,7 @@
 
 Prototype AArch64 OS for a dissertation comparing monolithic and microkernel styles. Bring-up is QEMU AArch64 `virt` first, then Raspberry Pi 4.
 
-## Milestones (current: M0-M7)
+## Milestones (current: M0-M8)
 - M0: Boot to EL1, UART output.
 - M1: Exception vectors installed.
 - M2: 1ms timer IRQ heartbeat via GIC + generic timer.
@@ -28,10 +28,16 @@ Prototype AArch64 OS for a dissertation comparing monolithic and microkernel sty
   - two EL0 tasks (`task_a`, `task_b`) replace kernel A/B demo threads
   - deferred preemption unchanged (no context switch in IRQ/SVC)
   - EL0 tasks share one sandbox region (`0x40E00000-0x41000000`)
-  - `TASK_BLOCKED` exists for future IPC but is unused in M7
+  - `TASK_BLOCKED` added in task model
   - M6 one-shot EL0 demo markers are retired
+- M8: Baseline synchronous IPC (still no MONO/MICRO divergence):
+  - static endpoint table with `EP_ECHO=1` owner on `task_b`
+  - EL0-only syscalls: `SYS_ipc_call=4`, `SYS_ipc_recv=5`, `SYS_ipc_reply=6`
+  - fixed-size kernel-copy messages (`IPC_MSG_SIZE=256`)
+  - one blocked caller + one blocked receiver + one pending request per endpoint
+  - `TASK_BLOCKED` is now active for blocking IPC paths
 
-Full EL0 process model, per-process mappings, IPC, and service model are staged for later milestones.
+Full process isolation, capability model, and service split are staged for later milestones.
 
 ## Recommended build locations
 - WSL2: build/run from Linux home, usually `~/src/proto-os`.
@@ -61,7 +67,7 @@ Expected output includes:
 - `[mmu] enabled identity map`
 - `[mmu] caches on`
 - `[tick] 1000` about once per second
-- interleaved `A` / `B` markers from persistent EL0 tasks over time
+- recurring `A` / `B` markers from persistent EL0 client/server IPC activity
 
 For microkernel flavor banner:
 
