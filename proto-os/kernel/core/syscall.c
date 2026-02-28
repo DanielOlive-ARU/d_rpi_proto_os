@@ -1,14 +1,7 @@
 #include "kernel/config.h"
 #include "kernel/drivers.h"
 #include "kernel/syscall.h"
-
-static volatile uint64_t g_el0_exit_target = 0;
-
-static inline uint64_t read_cntvct(void) {
-  uint64_t v;
-  asm volatile("mrs %0, cntvct_el0" : "=r"(v));
-  return v;
-}
+#include "kernel/thread.h"
 
 static int el0_write_range_ok(const char *buf, uint64_t len) {
   uintptr_t start;
@@ -36,14 +29,6 @@ static int el0_write_range_ok(const char *buf, uint64_t len) {
   return 1;
 }
 
-void syscall_set_el0_exit_target(uint64_t elr) {
-  g_el0_exit_target = elr;
-}
-
-void syscall_clear_el0_exit_target(void) {
-  g_el0_exit_target = 0;
-}
-
 uint64_t syscall_dispatch(struct trap_frame *tf, enum syscall_origin origin) {
   uint64_t i;
   const char *buf;
@@ -51,10 +36,14 @@ uint64_t syscall_dispatch(struct trap_frame *tf, enum syscall_origin origin) {
 
   switch (tf->x[8]) {
     case SYS_yield:
+      if (origin == SYSCALL_ORIGIN_EL0) {
+        thread_user_trap_redirect(tf, TASK_RETURN_YIELD);
+        return 0;
+      }
       asm volatile("yield");
       return 0;
     case SYS_time_ticks:
-      return read_cntvct();
+      return thread_ticks_now();
     case SYS_write:
       buf = (const char *)(uintptr_t)tf->x[0];
       len = tf->x[1];
@@ -69,11 +58,10 @@ uint64_t syscall_dispatch(struct trap_frame *tf, enum syscall_origin origin) {
       }
       return i;
     case SYS_exit:
-      if (origin != SYSCALL_ORIGIN_EL0 || g_el0_exit_target == 0) {
+      if (origin != SYSCALL_ORIGIN_EL0) {
         return (uint64_t)-1;
       }
-      tf->elr = g_el0_exit_target;
-      tf->spsr = SPSR_EL1H_MASKED;
+      thread_user_trap_redirect(tf, TASK_RETURN_EXIT);
       return 0;
     default:
       return (uint64_t)-1;

@@ -17,7 +17,5 @@ enum {
 };
 
 uint64_t syscall_dispatch(struct trap_frame *tf, enum syscall_origin origin);
-void syscall_set_el0_exit_target(uint64_t elr);
-void syscall_clear_el0_exit_target(void);
 
 #endif

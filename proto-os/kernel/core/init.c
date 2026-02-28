@@ -1,7 +1,6 @@
 #include "kernel/config.h"
 #include "kernel/arch.h"
 #include "kernel/drivers.h"
-#include "kernel/el0.h"
 #include "kernel/mmu.h"
 #include "kernel/panic.h"
 #include "kernel/printk.h"
@@ -55,6 +54,14 @@ void kernel_main(void) {
   mmu_init();
   uart_puts("[mmu] enabled identity map\n");
   uart_puts("[mmu] caches on\n");
-  el0_demo_run_once();
-  panic("EL0 demo flow returned unexpectedly");
+
+  gic_init();
+  timer_init();
+#if DEBUG_EARLY
+  uart_puts("EARLY: timer configured\n");
+#endif
+
+  arch_enable_irq();
+  thread_start();
+  panic("thread_start returned unexpectedly");
 }

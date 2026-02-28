@@ -2,7 +2,7 @@
 
 Prototype AArch64 OS for a dissertation comparing monolithic and microkernel styles. Bring-up is QEMU AArch64 `virt` first, then Raspberry Pi 4.
 
-## Milestones (current: M0-M6)
+## Milestones (current: M0-M7)
 - M0: Boot to EL1, UART output.
 - M1: Exception vectors installed.
 - M2: 1ms timer IRQ heartbeat via GIC + generic timer.
@@ -23,11 +23,13 @@ Prototype AArch64 OS for a dissertation comparing monolithic and microkernel sty
   - normal memory set to cacheable WB/WA attributes
   - `SCTLR_EL1.C=1` and `SCTLR_EL1.I=1`
   - device mappings/attributes unchanged
-- M6: One-shot EL0 user-mode smoke test:
-  - `eret` entry to EL0 and EL0 `SVC` handling in EL1
-  - `SYS_exit = 3` redirects exception return to a stable EL1 continuation target that resumes boot without relying on EL0 `x30`
-  - EL0-only bounds checks for `SYS_write` (overflow-safe range checks)
-  - EL0 sandbox in the last 2MiB of the 16MiB identity map
+- M6: EL0 smoke-test plumbing (`eret` + EL0 `SVC` path) and EL0-only `SYS_write` bounds checks.
+- M7: Persistent EL0 tasks on top of the existing scheduler:
+  - two EL0 tasks (`task_a`, `task_b`) replace kernel A/B demo threads
+  - deferred preemption unchanged (no context switch in IRQ/SVC)
+  - EL0 tasks share one sandbox region (`0x40E00000-0x41000000`)
+  - `TASK_BLOCKED` exists for future IPC but is unused in M7
+  - M6 one-shot EL0 demo markers are retired
 
 Full EL0 process model, per-process mappings, IPC, and service model are staged for later milestones.
 
@@ -58,10 +60,8 @@ Expected output includes:
 - `[svc] ticks <value>`
 - `[mmu] enabled identity map`
 - `[mmu] caches on`
-- `hello from el0` (exactly once)
-- `[el0] returned to el1` (exactly once)
 - `[tick] 1000` about once per second
-- interleaved `A` / `B` markers over time
+- interleaved `A` / `B` markers from persistent EL0 tasks over time
 
 For microkernel flavor banner:
 
