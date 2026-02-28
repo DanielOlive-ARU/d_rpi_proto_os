@@ -23,3 +23,17 @@ void printk_u64(uint64_t v) {
     uart_putc(buf[--i]);
   }
 }
+
+void printk_hex_u64(uint64_t v) {
+  static const char hex[] = "0123456789abcdef";
+  int i;
+  int started = 0;
+
+  for (i = 15; i >= 0; i--) {
+    uint8_t nibble = (uint8_t)((v >> (i * 4)) & 0xFULL);
+    if (nibble != 0 || started || i == 0) {
+      started = 1;
+      uart_putc(hex[nibble]);
+    }
+  }
+}

@@ -5,5 +5,6 @@
 
 void printk(const char *s);
 void printk_u64(uint64_t v);
+void printk_hex_u64(uint64_t v);
 
 #endif

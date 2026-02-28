@@ -14,6 +14,7 @@ DEBUG_TICK ?= 1
 DEBUG_EARLY ?= 0
 
 CFLAGS := -ffreestanding -nostdlib -fno-builtin -fno-stack-protector -Wall -Wextra -Werror -O2 -g
+CFLAGS += -mgeneral-regs-only
 CFLAGS += -mcpu=cortex-a57 -I kernel/include
 CFLAGS += -DDEBUG_TICK=$(DEBUG_TICK) -DDEBUG_EARLY=$(DEBUG_EARLY)
 
@@ -44,6 +45,8 @@ flavor-check:
 $(FLAVOR_STAMP):
 	@mkdir -p $(BUILD_DIR)
 	@printf "%s\n" "$(KERNEL_FLAVOR)" > $@
+
+$(BUILD_DIR)/el0/user_tasks.o: CFLAGS += -ffixed-x30
 
 $(BUILD_DIR)/%.o: kernel/%.c $(FLAVOR_STAMP)
 	@mkdir -p $(dir $@)

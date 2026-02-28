@@ -1,41 +1,92 @@
 #include "kernel/arch.h"
+#include "kernel/config.h"
 #include "kernel/drivers.h"
+#include "kernel/el0.h"
+#include "kernel/panic.h"
+#include "kernel/printk.h"
 #include "kernel/thread.h"
 
 #define THREAD_COUNT 3U
-#define THREAD_SLOT_A 0U
-#define THREAD_SLOT_B 1U
+#define THREAD_SLOT_TASK_A 0U
+#define THREAD_SLOT_TASK_B 1U
 #define THREAD_SLOT_IDLE 2U
 #define THREAD_STACK_SIZE 4096U
-#define THREAD_PRINT_PERIOD_TICKS 200ULL
+
+extern char __el0_task_a_stack_bottom;
+extern char __el0_task_a_stack_top;
+extern char __el0_task_b_stack_bottom;
+extern char __el0_task_b_stack_top;
+extern char __el0_sandbox_end;
+extern void __el0_task_a_entry(void);
+extern void __el0_task_b_entry(void);
 
 static struct thread g_threads[THREAD_COUNT];
 static struct thread *g_current = 0;
+static struct thread *g_current_task = 0;
 static struct thread_ctx g_boot_ctx;
 
 static volatile uint64_t g_sched_ticks = 0;
 static volatile uint32_t g_resched_pending = 0;
 
-__attribute__((aligned(16))) static uint8_t g_stack_a[THREAD_STACK_SIZE];
-__attribute__((aligned(16))) static uint8_t g_stack_b[THREAD_STACK_SIZE];
+__attribute__((aligned(16))) static uint8_t g_stack_task_a[THREAD_STACK_SIZE];
+__attribute__((aligned(16))) static uint8_t g_stack_task_b[THREAD_STACK_SIZE];
 __attribute__((aligned(16))) static uint8_t g_stack_idle[THREAD_STACK_SIZE];
 
-static void thread_entry_a(void *arg);
-static void thread_entry_b(void *arg);
+static __attribute__((noreturn)) void thread_entry_user_task(void *arg);
 static void thread_entry_idle(void *arg);
 static void thread_bootstrap(void);
+extern void user_task_return_to_kernel(void);
+__attribute__((noinline)) void user_task_return_step(void);
+struct user_task_ctx *thread_current_user_ctx(void);
 
 static inline uint64_t stack_top(uint8_t *stack, uint64_t size) {
   uintptr_t top = (uintptr_t)(stack + size);
   return (uint64_t)(top & ~((uintptr_t)0xFULL));
 }
 
-static inline int tick_reached(uint64_t now, uint64_t target) {
-  return (int64_t)(now - target) >= 0;
+static int thread_is_selectable(const struct thread *t) {
+  if (!t) {
+    return 0;
+  }
+  if (t->state != THREAD_RUNNABLE && t->state != THREAD_RUNNING) {
+    return 0;
+  }
+  if (t->kind == THREAD_USER_TASK && t->user.state == TASK_DEAD) {
+    return 0;
+  }
+  return 1;
+}
+
+static void validate_el0_layout(void) {
+  uintptr_t sandbox_end = (uintptr_t)&__el0_sandbox_end;
+  uintptr_t task_a_entry = (uintptr_t)&__el0_task_a_entry;
+  uintptr_t task_b_entry = (uintptr_t)&__el0_task_b_entry;
+  uintptr_t task_a_bottom = (uintptr_t)&__el0_task_a_stack_bottom;
+  uintptr_t task_a_top = (uintptr_t)&__el0_task_a_stack_top;
+  uintptr_t task_b_bottom = (uintptr_t)&__el0_task_b_stack_bottom;
+  uintptr_t task_b_top = (uintptr_t)&__el0_task_b_stack_top;
+
+  if (sandbox_end > EL0_CODE_END) {
+    panic("EL0 code exceeds reserved region");
+  }
+
+  if (task_a_entry < EL0_SANDBOX_BASE || task_a_entry >= EL0_CODE_END) {
+    panic("task_a entry outside EL0 code region");
+  }
+
+  if (task_b_entry < EL0_SANDBOX_BASE || task_b_entry >= EL0_CODE_END) {
+    panic("task_b entry outside EL0 code region");
+  }
+
+  if (task_a_bottom != EL0_TASK_A_STACK_BOTTOM || task_a_top != EL0_TASK_A_STACK_TOP ||
+      task_b_bottom != EL0_TASK_B_STACK_BOTTOM || task_b_top != EL0_TASK_B_STACK_TOP) {
+    panic("EL0 stack symbol mismatch");
+  }
 }
 
 static void thread_init_slot(struct thread *t,
                              uint32_t slot,
+                             enum thread_kind kind,
                              const char *name,
                              void (*entry)(void *arg),
                              void *arg,
@@ -55,11 +106,39 @@ static void thread_init_slot(struct thread *t,
   t->ctx.sp = stack_top(stack, stack_size);
   t->ctx.lr = (uint64_t)(uintptr_t)thread_bootstrap;
   t->state = THREAD_RUNNABLE;
+  t->kind = kind;
   t->quantum_left = THREAD_QUANTUM_TICKS;
   t->slot = slot;
   t->entry = entry;
   t->arg = arg;
   t->name = name;
+  t->user.state = TASK_DEAD;
+  t->user.return_reason = TASK_RETURN_NONE;
+  t->user.user_entry = 0;
+  t->user.user_sp = 0;
+  t->user.ttbr0_future = 0;
+  t->user.name = 0;
+  t->user.started = 0;
+}
+
+static void user_task_init(struct thread *t,
+                           const char *task_name,
+                           uint64_t entry,
+                           uint64_t user_sp) {
+  uint32_t i;
+
+  for (i = 0; i < 31; i++) {
+    t->user.ctx.x[i] = 0;
+  }
+  t->user.ctx.sp_el0 = user_sp;
+  t->user.ctx.elr = entry;
+  t->user.ctx.spsr = SPSR_EL0T_MASKED;
+  t->user.state = TASK_RUNNABLE;
+  t->user.return_reason = TASK_RETURN_NONE;
+  t->user.user_entry = entry;
+  t->user.user_sp = user_sp;
+  t->user.name = task_name;
+  t->user.started = 0;
 }
 
 static struct thread *pick_next_thread(void) {
@@ -72,16 +151,20 @@ static struct thread *pick_next_thread(void) {
     if (idx == THREAD_SLOT_IDLE) {
       continue;
     }
-    if (&g_threads[idx] != g_current && g_threads[idx].state == THREAD_RUNNABLE) {
+    if (&g_threads[idx] != g_current && thread_is_selectable(&g_threads[idx])) {
       return &g_threads[idx];
     }
   }
 
-  if (g_current && (g_current->state == THREAD_RUNNING || g_current->state == THREAD_RUNNABLE)) {
+  if (thread_is_selectable(g_current) && g_current->slot != THREAD_SLOT_IDLE) {
     return g_current;
   }
 
-  return &g_threads[THREAD_SLOT_IDLE];
+  if (thread_is_selectable(&g_threads[THREAD_SLOT_IDLE])) {
+    return &g_threads[THREAD_SLOT_IDLE];
+  }
+
+  panic("no selectable threads");
 }
 
 static void thread_switch_to(struct thread *next) {
@@ -100,6 +183,10 @@ static void thread_switch_to(struct thread *next) {
 
   if (!next->quantum_left) {
     next->quantum_left = THREAD_QUANTUM_TICKS;
+  }
+
+  if (next->ctx.lr == 0 || next->ctx.sp == 0) {
+    panic("invalid next thread context");
   }
 
   if (prev) {
@@ -123,30 +210,89 @@ static void thread_bootstrap(void) {
   }
 }
 
-static void thread_entry_a(void *arg) {
-  uint64_t next = thread_ticks_now() + THREAD_PRINT_PERIOD_TICKS;
-  (void)arg;
-
-  for (;;) {
-    if (tick_reached(thread_ticks_now(), next)) {
-      uart_puts("A\n");
-      next += THREAD_PRINT_PERIOD_TICKS;
-    }
-    thread_resched_point();
-  }
+static __attribute__((noreturn)) void thread_enter_el0(struct thread *t) {
+  g_current_task = t;
+  t->state = THREAD_RUNNING;
+  t->user.state = TASK_RUNNING;
+  el0_resume(&t->user.ctx);
+  panic("el0_resume returned");
 }
 
-static void thread_entry_b(void *arg) {
-  uint64_t next = thread_ticks_now() + THREAD_PRINT_PERIOD_TICKS;
-  (void)arg;
+static __attribute__((noreturn)) void thread_entry_user_task(void *arg) {
+  struct thread *t = (struct thread *)(uintptr_t)arg;
 
-  for (;;) {
-    if (tick_reached(thread_ticks_now(), next)) {
-      uart_puts("B\n");
-      next += THREAD_PRINT_PERIOD_TICKS;
-    }
-    thread_resched_point();
+  if (!t || t->kind != THREAD_USER_TASK) {
+    panic("invalid user task thread");
   }
+
+  if (!t->user.started) {
+    t->user.started = 1;
+  }
+
+  thread_enter_el0(t);
+}
+
+__attribute__((noinline)) void user_task_return_step(void) {
+  struct thread *t = g_current_task;
+
+  if (!t || t != g_current || t->kind != THREAD_USER_TASK) {
+    panic("invalid current user task");
+  }
+
+  if (t->user.return_reason == TASK_RETURN_YIELD) {
+    t->user.state = TASK_RUNNABLE;
+    t->state = THREAD_RUNNABLE;
+  } else if (t->user.return_reason == TASK_RETURN_EXIT ||
+             t->user.return_reason == TASK_RETURN_FAULT) {
+    if (t->user.return_reason == TASK_RETURN_EXIT) {
+      uart_puts("[task] exit ");
+      if (t->user.name) {
+        uart_puts(t->user.name);
+      } else {
+        uart_puts("unknown");
+      }
+      uart_puts("\n");
+    }
+    t->user.state = TASK_DEAD;
+    t->state = THREAD_STOPPED;
+  } else {
+    panic("unknown user return reason");
+  }
+
+  g_resched_pending = 1;
+  thread_resched_point();
+
+  if (g_current != t || t->kind != THREAD_USER_TASK) {
+    panic("resumed user continuation on non-user thread");
+  }
+  if (t->state == THREAD_STOPPED || t->user.state == TASK_DEAD) {
+    panic("dead user task resumed");
+  }
+
+  t->state = THREAD_RUNNING;
+  t->user.state = TASK_RUNNING;
+  t->user.return_reason = TASK_RETURN_NONE;
+  g_current_task = t;
+}
+
+struct user_task_ctx *thread_current_user_ctx(void) {
+  struct thread *t = g_current_task;
+  uintptr_t ctx_addr;
+
+  if (!t || t != g_current || t->kind != THREAD_USER_TASK) {
+    panic("invalid current user task");
+  }
+
+  ctx_addr = (uintptr_t)&t->user.ctx;
+
+  if (ctx_addr < KERNEL_LOAD_ADDR ||
+      ctx_addr + sizeof(t->user.ctx) > (KERNEL_LOAD_ADDR + KERNEL_IDMAP_SIZE)) {
+    panic("user context pointer outside kernel map");
+  }
+  if (t->user.ctx.elr < EL0_SANDBOX_BASE || t->user.ctx.elr >= EL0_SANDBOX_END) {
+    panic("user resume ELR outside sandbox");
+  }
+  return &t->user.ctx;
 }
 
 static void thread_entry_idle(void *arg) {
@@ -161,23 +307,39 @@ void thread_system_init(void) {
   g_sched_ticks = 0;
   g_resched_pending = 0;
   g_current = 0;
+  g_current_task = 0;
 
-  thread_init_slot(&g_threads[THREAD_SLOT_A],
-                   THREAD_SLOT_A,
-                   "thread_a",
-                   thread_entry_a,
-                   0,
-                   g_stack_a,
+  validate_el0_layout();
+
+  thread_init_slot(&g_threads[THREAD_SLOT_TASK_A],
+                   THREAD_SLOT_TASK_A,
+                   THREAD_USER_TASK,
+                   "task_a_thread",
+                   thread_entry_user_task,
+                   &g_threads[THREAD_SLOT_TASK_A],
+                   g_stack_task_a,
                    THREAD_STACK_SIZE);
-  thread_init_slot(&g_threads[THREAD_SLOT_B],
-                   THREAD_SLOT_B,
-                   "thread_b",
-                   thread_entry_b,
-                   0,
-                   g_stack_b,
+  user_task_init(&g_threads[THREAD_SLOT_TASK_A],
+                 "task_a",
+                 (uint64_t)(uintptr_t)&__el0_task_a_entry,
+                 (uint64_t)(uintptr_t)&__el0_task_a_stack_top);
+
+  thread_init_slot(&g_threads[THREAD_SLOT_TASK_B],
+                   THREAD_SLOT_TASK_B,
+                   THREAD_USER_TASK,
+                   "task_b_thread",
+                   thread_entry_user_task,
+                   &g_threads[THREAD_SLOT_TASK_B],
+                   g_stack_task_b,
                    THREAD_STACK_SIZE);
+  user_task_init(&g_threads[THREAD_SLOT_TASK_B],
+                 "task_b",
+                 (uint64_t)(uintptr_t)&__el0_task_b_entry,
+                 (uint64_t)(uintptr_t)&__el0_task_b_stack_top);
+
   thread_init_slot(&g_threads[THREAD_SLOT_IDLE],
                    THREAD_SLOT_IDLE,
+                   THREAD_IDLE,
                    "idle",
                    thread_entry_idle,
                    0,
@@ -186,7 +348,7 @@ void thread_system_init(void) {
 }
 
 void thread_start(void) {
-  thread_switch_to(&g_threads[THREAD_SLOT_A]);
+  thread_switch_to(&g_threads[THREAD_SLOT_TASK_A]);
 
   for (;;) {
     asm volatile("wfi");
@@ -226,6 +388,58 @@ void thread_resched_point(void) {
 
   next = pick_next_thread();
   thread_switch_to(next);
+}
+
+void thread_user_trap_redirect(struct trap_frame *tf, enum task_return_reason reason) {
+  struct thread *t = g_current_task;
+  uint32_t i;
+
+  if (!t || t != g_current || t->kind != THREAD_USER_TASK) {
+    panic("EL0 trap redirect without user task");
+  }
+
+  if (t->ctx.lr == 0 || t->ctx.sp == 0) {
+    panic("current user thread context invalid");
+  }
+
+  if (tf->elr < EL0_SANDBOX_BASE || tf->elr >= EL0_SANDBOX_END) {
+    panic("EL0 trap ELR outside sandbox");
+  }
+
+  for (i = 0; i < 31; i++) {
+    t->user.ctx.x[i] = tf->x[i];
+  }
+  t->user.ctx.sp_el0 = tf->sp;
+  t->user.ctx.elr = tf->elr;
+  t->user.ctx.spsr = tf->spsr;
+  t->user.return_reason = reason;
+
+  tf->elr = (uint64_t)(uintptr_t)user_task_return_to_kernel;
+  tf->spsr = SPSR_EL1H_MASKED;
+}
+
+void thread_user_fault(struct trap_frame *tf) {
+  struct thread *t = g_current_task;
+
+  if (!t || t != g_current || t->kind != THREAD_USER_TASK) {
+    panic("EL0 fault without user task");
+  }
+
+  uart_puts("[fault] ");
+  if (t->user.name) {
+    uart_puts(t->user.name);
+  } else {
+    uart_puts("unknown");
+  }
+  uart_puts(" dead esr=0x");
+  printk_hex_u64(tf->esr);
+  uart_puts(" elr=0x");
+  printk_hex_u64(tf->elr);
+  uart_puts(" far=0x");
+  printk_hex_u64(tf->far);
+  uart_puts("\n");
+
+  thread_user_trap_redirect(tf, TASK_RETURN_FAULT);
 }
 
 uint64_t thread_ticks_now(void) {
