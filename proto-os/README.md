@@ -2,7 +2,7 @@
 
 Prototype AArch64 OS for a dissertation comparing monolithic and microkernel styles. Bring-up is QEMU AArch64 `virt` first, then Raspberry Pi 4.
 
-## Milestones (current: M0-M8)
+## Milestones (current: M0-M9)
 - M0: Boot to EL1, UART output.
 - M1: Exception vectors installed.
 - M2: 1ms timer IRQ heartbeat via GIC + generic timer.
@@ -31,11 +31,16 @@ Prototype AArch64 OS for a dissertation comparing monolithic and microkernel sty
   - `TASK_BLOCKED` added in task model
   - M6 one-shot EL0 demo markers are retired
 - M8: Baseline synchronous IPC (still no MONO/MICRO divergence):
-  - static endpoint table with `EP_ECHO=1` owner on `task_b`
+  - static endpoint table with one active endpoint owner on `task_b`
   - EL0-only syscalls: `SYS_ipc_call=4`, `SYS_ipc_recv=5`, `SYS_ipc_reply=6`
   - fixed-size kernel-copy messages (`IPC_MSG_SIZE=256`)
   - one blocked caller + one blocked receiver + one pending request per endpoint
   - `TASK_BLOCKED` is now active for blocking IPC paths
+- M9: First MONO/MICRO architectural split on `SYS_write`:
+  - MONO: EL0 `SYS_write` uses direct kernel UART write
+  - MICRO: EL0 `SYS_write` (except `task_b` uart_server) is routed via IPC to `EP_UART=1`
+  - `task_b` runs a user-space uart_server loop and prints one-time `[uart] ready`
+  - PL011 remains kernel-mediated (not mapped into EL0)
 
 Full process isolation, capability model, and service split are staged for later milestones.
 
@@ -66,8 +71,9 @@ Expected output includes:
 - `[svc] ticks <value>`
 - `[mmu] enabled identity map`
 - `[mmu] caches on`
+- one-time `[uart] ready`
 - `[tick] 1000` about once per second
-- recurring `A` / `B` markers from persistent EL0 client/server IPC activity
+- recurring `A` marker from EL0 writer task (`task_a`)
 
 For microkernel flavor banner:
 
