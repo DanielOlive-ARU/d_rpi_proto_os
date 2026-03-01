@@ -1,9 +1,9 @@
-# Design Notes (M0-M8)
+# Design Notes (M0-M9)
 
 ## Scope
-- Bring-up target is QEMU AArch64 `virt` for M0-M8.
-- Implemented path: boot -> UART -> vectors -> timer IRQ heartbeat -> minimal SVC dispatch -> deferred scheduler -> MMU identity map -> caches on -> persistent EL0 tasks -> synchronous IPC baseline.
-- MONO/MICRO behavior remains identical in M8 except boot banner.
+- Bring-up target is QEMU AArch64 `virt` for M0-M9.
+- Implemented path: boot -> UART -> vectors -> timer IRQ heartbeat -> minimal SVC dispatch -> deferred scheduler -> MMU identity map -> caches on -> persistent EL0 tasks -> synchronous IPC baseline -> `SYS_write` service split.
+- M9 is the first functional MONO/MICRO divergence.
 
 ## Build environment policy
 - Preferred build location on Windows hosts: WSL2 Linux filesystem (for example `~/src/proto-os`).
@@ -24,18 +24,19 @@
 - EL0-only bounds checks are enforced for `SYS_write` (overflow-safe, strict zero-length check).
 - IPC buffers use the same EL0 sandbox bounds-checking model.
 
-## Scheduler and EL0 task model (current M8)
+## Scheduler and EL0 task model (current M9)
 - Existing EL1 scheduler/context-switch core is retained.
 - Deferred preemption remains unchanged:
   - timer IRQ updates tick/quantum and sets reschedule pending
   - no context switch in IRQ or SVC paths
   - switching occurs only at safe thread-context points
-- Two persistent EL0 tasks now exercise baseline IPC:
-  - `task_a` (client) performs `SYS_ipc_call(EP_ECHO, ...)`, prints `A`, then yields
-  - `task_b` (server) performs `SYS_ipc_recv(EP_ECHO, ...)`, prints `B`, replies, then yields
+- Two persistent EL0 tasks now implement writer/server split:
+  - `task_a` calls `SYS_write("A\n")` periodically, then yields
+  - `task_b` runs `uart_server`: prints one-time `[uart] ready`, receives endpoint messages, writes payload, sends ACK reply
 - Idle thread/path remains in EL1 and uses `WFI`.
 - Task states include `TASK_RUNNABLE`, `TASK_RUNNING`, `TASK_BLOCKED`, `TASK_DEAD`.
-- `TASK_BLOCKED` is active for blocking IPC paths (`ipc_call`, `ipc_recv` slow path).
+- `TASK_BLOCKED` is active for blocking IPC paths (`ipc_call` and `ipc_recv` slow path).
+- In MONO, `task_b` blocks in `ipc_recv` after `[uart] ready`; this is expected in M9.
 - EL0 synchronous non-SVC faults kill the current EL0 task and log a compact one-line fault message.
 
 ## EL1 <-> EL0 return mechanics (current)
@@ -66,21 +67,28 @@
 - User stack top: `0x40020000` (downward growth).
 - User apps remain planned as flat, position-dependent images initially.
 
-## IPC baseline (current M8)
+## IPC baseline (current M9)
 - Model: synchronous call/reply with fixed-size kernel-copy messages (`IPC_MSG_SIZE=256`).
 - Endpoint table is static in-kernel.
 - Active endpoint:
-  - `EP_ECHO = 1` owned by `task_b`
+  - `EP_UART = 1` owned by `task_b`
 - Per-endpoint state is intentionally minimal:
   - one pending request slot
   - one blocked caller awaiting reply
   - one blocked receiver awaiting request
-- No capabilities, dynamic registration, or deep queues in M8.
+- Endpoint state includes `caller_result_override` to preserve return semantics for internally routed `SYS_write` calls in MICRO.
+- No capabilities, dynamic registration, or deep queues in M9.
+
+## MONO vs MICRO split (M9)
+- MONO:
+  - `SYS_write` remains direct kernel UART path.
+- MICRO:
+  - `SYS_write` from normal EL0 tasks routes through `EP_UART` via IPC to `task_b` uart_server.
+  - `SYS_write` from EL1 and from `task_b` uses direct kernel UART path (prevents recursion, preserves boot/log path).
+  - Routed write requests are limited to `len <= IPC_MSG_SIZE`.
 
 ## IPC roadmap (future)
-- Add static endpoints for UART/supervisor service split:
-  - `EP_UART = 2`
-  - `EP_SUPERVISOR = 3`
+- Add supervisor and richer endpoint ownership policy in later milestones.
 - Add owner/pid policy and capability model in later milestones.
 
 ## Fault policy roadmap

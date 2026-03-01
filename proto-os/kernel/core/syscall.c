@@ -30,8 +30,15 @@ static int el0_write_range_ok(const char *buf, uint64_t len) {
   return 1;
 }
 
-uint64_t syscall_dispatch(struct trap_frame *tf, enum syscall_origin origin) {
+static uint64_t uart_write_direct(const char *buf, uint64_t len) {
   uint64_t i;
+  for (i = 0; i < len; i++) {
+    uart_putc(buf[i]);
+  }
+  return i;
+}
+
+uint64_t syscall_dispatch(struct trap_frame *tf, enum syscall_origin origin) {
   const char *buf;
   uint64_t len;
 
@@ -54,10 +61,18 @@ uint64_t syscall_dispatch(struct trap_frame *tf, enum syscall_origin origin) {
       if (origin == SYSCALL_ORIGIN_EL0 && !el0_write_range_ok(buf, len)) {
         return (uint64_t)-1;
       }
-      for (i = 0; i < len; i++) {
-        uart_putc(buf[i]);
+      if (origin == SYSCALL_ORIGIN_EL1) {
+        return uart_write_direct(buf, len);
       }
-      return i;
+#ifdef KERNEL_FLAVOR_MICRO
+      if (thread_current_user_slot() != THREAD_SLOT_TASK_B) {
+        if (len > IPC_MSG_SIZE) {
+          return (uint64_t)-1;
+        }
+        return ipc_route_uart_write(tf, (const uint8_t *)(uintptr_t)buf, len);
+      }
+#endif
+      return uart_write_direct(buf, len);
     case SYS_exit:
       if (origin != SYSCALL_ORIGIN_EL0) {
         return (uint64_t)-1;

@@ -28,8 +28,9 @@ Expected runtime output includes:
 - `[svc] ok` and `[svc] ticks ...`
 - `[mmu] enabled identity map`
 - `[mmu] caches on`
+- one-time `[uart] ready`
 - `[tick] 1000` heartbeat
-- recurring `A` / `B` markers from EL0 IPC client/server loops (`EP_ECHO`)
+- recurring `A` marker from EL0 writer task
 
 Underlying QEMU command:
 
