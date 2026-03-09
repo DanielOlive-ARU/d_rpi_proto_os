@@ -1,7 +1,10 @@
 # Raspberry Pi 4 Deployment (future)
 
-Not implemented yet. M0-M4 is validated on QEMU `virt`; Pi4 bring-up remains future work.
-The build also produces `build/kernel8.img` for later Pi 4 work.
+M0-M10 is validated on QEMU `virt`. Raspberry Pi 4 hardware bring-up and
+validation remain future work.
+
+The build currently produces `build/kernel8.img`, which is the artifact planned
+for upcoming Pi 4 boot tests.
 
 Planned steps (later):
 - Copy `kernel8.img` to the Pi boot partition.

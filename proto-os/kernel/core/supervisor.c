@@ -57,6 +57,7 @@ uint64_t supervisor_syscall_restart(uint64_t slot) {
   if (thread_current_user_slot() != THREAD_SLOT_TASK_C) {
     return (uint64_t)-1;
   }
+  /* M10 scope: only task_b restart is permitted. */
   if (slot != THREAD_SLOT_TASK_B) {
     return (uint64_t)-1;
   }

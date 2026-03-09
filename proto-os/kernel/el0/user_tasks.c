@@ -106,7 +106,6 @@ void __el0_task_b_entry(void) {
         asm volatile("brk #0");
       }
     }
-    el0_yield();
   }
 }
 
@@ -120,6 +119,5 @@ void __el0_task_c_entry(void) {
         (void)el0_write(g_sup_restarted_msg, sizeof(g_sup_restarted_msg) - 1);
       }
     }
-    el0_yield();
   }
 }
