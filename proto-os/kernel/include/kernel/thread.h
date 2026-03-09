@@ -4,11 +4,12 @@
 #include "kernel/types.h"
 
 #define THREAD_QUANTUM_TICKS 10U
-#define THREAD_COUNT 3U
+#define THREAD_COUNT 4U
 
 #define THREAD_SLOT_TASK_A 0U
 #define THREAD_SLOT_TASK_B 1U
-#define THREAD_SLOT_IDLE 2U
+#define THREAD_SLOT_TASK_C 2U
+#define THREAD_SLOT_IDLE 3U
 
 enum thread_state {
   THREAD_RUNNABLE = 0,
@@ -33,7 +34,8 @@ enum task_return_reason {
   TASK_RETURN_YIELD = 1,
   TASK_RETURN_EXIT = 2,
   TASK_RETURN_FAULT = 3,
-  TASK_RETURN_IPC_BLOCK = 4
+  TASK_RETURN_IPC_BLOCK = 4,
+  TASK_RETURN_NOTIFY_BLOCK = 5
 };
 
 struct thread_ctx {
@@ -97,5 +99,6 @@ void thread_request_resched(void);
 struct user_task_ctx *thread_current_user_ctx(void);
 void thread_user_trap_redirect(struct trap_frame *tf, enum task_return_reason reason);
 void thread_user_fault(struct trap_frame *tf);
+int thread_user_restart(uint32_t slot);
 
 #endif

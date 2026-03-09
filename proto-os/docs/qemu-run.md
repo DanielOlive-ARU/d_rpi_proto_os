@@ -29,8 +29,18 @@ Expected runtime output includes:
 - `[mmu] enabled identity map`
 - `[mmu] caches on`
 - one-time `[uart] ready`
+- one-time `[sup] ready`
 - `[tick] 1000` heartbeat
 - recurring `A` marker from EL0 writer task
+
+MICRO-only M10 recovery markers:
+- one EL0 fault line when `task_b` is intentionally crashed
+- one-time `[sup] restarted uart`
+- second `[uart] ready` after restart
+
+MONO behavior at M10:
+- no restart marker
+- `task_b` and `task_c` remain blocked after their startup lines
 
 Underlying QEMU command:
 

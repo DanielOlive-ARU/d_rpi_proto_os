@@ -11,6 +11,7 @@
 #define EP_COUNT 2U
 
 void ipc_init(void);
+void ipc_handle_task_death(uint32_t slot);
 uint64_t ipc_syscall_call(struct trap_frame *tf);
 uint64_t ipc_syscall_recv(struct trap_frame *tf);
 uint64_t ipc_syscall_reply(struct trap_frame *tf);

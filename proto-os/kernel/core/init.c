@@ -5,6 +5,7 @@
 #include "kernel/mmu.h"
 #include "kernel/panic.h"
 #include "kernel/printk.h"
+#include "kernel/supervisor.h"
 #include "kernel/syscall.h"
 #include "kernel/thread.h"
 
@@ -53,6 +54,7 @@ void kernel_main(void) {
 
   thread_system_init();
   ipc_init();
+  supervisor_init();
   mmu_init();
   uart_puts("[mmu] enabled identity map\n");
   uart_puts("[mmu] caches on\n");
