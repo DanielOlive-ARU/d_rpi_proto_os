@@ -132,6 +132,11 @@ timeout 16s make recovery-micro-qemu | tee micro_recovery.log
 `recovery_window` measures the elapsed time of a client routed `SYS_write`
 that spans the crash and supervised restart from the client perspective. In M11
 it is intentionally one sample per boot/run because the injected crash is one-shot.
+The measured interval includes the kernel's `BENCH_META phase=fault_injected`
+emission via the UART. Under QEMU's PL011 emulation this is a small fraction
+of the total; on real PL011 hardware at 115200 baud the emission would
+contribute a substantial component, so cross-environment interpretation should
+account for this.
 
 ## Environment Note
 
