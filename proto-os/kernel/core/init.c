@@ -9,7 +9,7 @@
 #include "kernel/syscall.h"
 #include "kernel/thread.h"
 
-#ifdef BENCH_MODE_OFF
+#if defined(BENCH_MODE_OFF) && !defined(PI4_SMOKE)
 static uint64_t svc_call2(uint64_t nr, uint64_t arg0, uint64_t arg1) {
   register uint64_t x0 asm("x0") = arg0;
   register uint64_t x1 asm("x1") = arg1;
