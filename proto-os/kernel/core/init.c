@@ -29,6 +29,18 @@ static uint64_t svc_time_ticks(void) {
 #endif
 
 void kernel_main(void) {
+#ifdef PI4_SMOKE
+  /* Step 1 Pi4 bring-up: absolute minimum path. Firmware has enable_uart=1
+     active, so the mini-UART is already initialised. Emit a deterministic
+     marker and halt. No vectors, no MMU, no scheduler — we want to isolate
+     serial verification from every other bring-up risk. */
+  uart_init();
+  uart_puts("PI4 BOOT\n");
+  for (;;) {
+    asm volatile("wfi");
+  }
+#else
+
 #ifdef BENCH_MODE_OFF
   uint64_t sample_ticks;
   static const char svc_ok[] = "[svc] ok\n";
@@ -86,4 +98,5 @@ void kernel_main(void) {
   arch_enable_irq();
   thread_start();
   panic("thread_start returned unexpectedly");
+#endif /* PI4_SMOKE */
 }

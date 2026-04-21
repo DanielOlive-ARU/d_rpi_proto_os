@@ -1,0 +1,28 @@
+# proto-os Raspberry Pi 4 firmware configuration.
+#
+# This file belongs on the SD card's FAT32 firmware/boot partition,
+# alongside bootcode.bin, start4.elf, fixup4.dat, and kernel8.img. On
+# Raspberry Pi OS based images, that partition is mounted at /boot/firmware
+# (post-bookworm) or /boot (pre-bookworm) — the firmware reads config.txt
+# from the root of that partition.
+#
+# Why these settings:
+#   arm_64bit=1         — firmware loads a 64-bit kernel (kernel8.img by
+#                         default when this flag is set).
+#   enable_uart=1       — firmware initialises the mini-UART (AUX UART1),
+#                         routes it to GPIO14 (TXD) / GPIO15 (RXD) via alt
+#                         function 5, programs 8N1 115200 baud, and pins
+#                         core_freq to 250 MHz so the baud divider stays
+#                         stable. The Step 1 kernel assumes all of this.
+#   kernel_address=0x40000000
+#                       — firmware loads kernel8.img at physical address
+#                         0x40000000, which matches our linker base.
+#                         Without this, firmware loads at 0x80000.
+
+arm_64bit=1
+enable_uart=1
+kernel_address=0x40000000
+
+# Reserved / future:
+#   core_freq=250  — explicit pin once we own mini-UART baud setup ourselves.
+#   dtoverlay=disable-bt  — only if we switch to PL011 on GPIO14/15 later.
