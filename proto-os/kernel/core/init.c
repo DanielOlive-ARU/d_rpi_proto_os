@@ -9,6 +9,7 @@
 #include "kernel/syscall.h"
 #include "kernel/thread.h"
 
+#ifdef BENCH_MODE_OFF
 static uint64_t svc_call2(uint64_t nr, uint64_t arg0, uint64_t arg1) {
   register uint64_t x0 asm("x0") = arg0;
   register uint64_t x1 asm("x1") = arg1;
@@ -25,12 +26,16 @@ static uint64_t svc_write(const char *buf, uint64_t len) {
 static uint64_t svc_time_ticks(void) {
   return svc_call2(SYS_time_ticks, 0, 0);
 }
+#endif
 
 void kernel_main(void) {
+#ifdef BENCH_MODE_OFF
   uint64_t sample_ticks;
   static const char svc_ok[] = "[svc] ok\n";
+#endif
 
   uart_init();
+#ifdef BENCH_MODE_OFF
   uart_puts("BOOT\n");
 
 #if DEBUG_EARLY
@@ -39,30 +44,43 @@ void kernel_main(void) {
 
   uart_puts("[boot] proto-os (" KERNEL_FLAVOR_STR ")\n");
   uart_puts("[boot] entered kernel_main\n");
+#endif
 
   vectors_init();
-#if DEBUG_EARLY
+#if defined(BENCH_MODE_OFF) && DEBUG_EARLY
   uart_puts("EARLY: vectors installed\n");
 #endif
 
+#ifdef BENCH_MODE_OFF
   (void)svc_write(svc_ok, sizeof(svc_ok) - 1);
   (void)svc_call2(SYS_yield, 0, 0);
   sample_ticks = svc_time_ticks();
   uart_puts("[svc] ticks ");
   printk_u64(sample_ticks);
   uart_puts("\n");
+#endif
 
   thread_system_init();
   ipc_init();
   supervisor_init();
   mmu_init();
+#ifdef BENCH_MODE_OFF
   uart_puts("[mmu] enabled identity map\n");
   uart_puts("[mmu] caches on\n");
+#endif
 
   gic_init();
   timer_init();
-#if DEBUG_EARLY
+#if defined(BENCH_MODE_OFF) && DEBUG_EARLY
   uart_puts("EARLY: timer configured\n");
+#endif
+#if !defined(BENCH_MODE_OFF)
+  uart_puts("BENCH_META schema=1 phase=start flavor=" KERNEL_FLAVOR_STR
+            " mode=" BENCH_MODE_STR " cntfrq_hz=");
+  printk_u64(timer_counter_freq_hz());
+  uart_puts(" iterations=");
+  printk_u64(BENCH_ITERATIONS);
+  uart_puts("\n");
 #endif
 
   arch_enable_irq();

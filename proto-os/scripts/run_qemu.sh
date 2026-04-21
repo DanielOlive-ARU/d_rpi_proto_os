@@ -12,7 +12,7 @@ if [ ! -f build/kernel.elf ]; then
 fi
 
 if grep -qi microsoft /proc/sys/kernel/osrelease 2>/dev/null; then
-  if [[ "$PWD" == /mnt/* ]]; then
+  if [[ "$PWD" == /mnt/* ]] && [[ "${PROTO_OS_SILENCE_WSL_WARNING:-0}" != "1" ]]; then
     echo "warning: WSL builds are recommended from ~/src/proto-os, not /mnt/* (faster IO, cleaner file modes)." >&2
   fi
 fi

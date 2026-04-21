@@ -36,6 +36,7 @@ void gic_init(void);
 void gic_handle_irq(void);
 void timer_init(void);
 void timer_handle_irq(void);
+uint64_t timer_counter_freq_hz(void);
 void arch_enable_irq(void);
 void arch_disable_irq(void);
 

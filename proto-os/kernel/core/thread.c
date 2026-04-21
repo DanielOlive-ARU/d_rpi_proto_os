@@ -522,6 +522,22 @@ void thread_user_fault(struct trap_frame *tf) {
     panic("EL0 fault without user task");
   }
 
+#ifdef BENCH_MODE_RECOVERY
+  uart_puts("BENCH_META schema=1 phase=fault_injected flavor=" KERNEL_FLAVOR_STR
+            " mode=" BENCH_MODE_STR " task=");
+  if (t->user.name) {
+    uart_puts(t->user.name);
+  } else {
+    uart_puts("unknown");
+  }
+  uart_puts(" esr=0x");
+  printk_hex_u64(tf->esr);
+  uart_puts(" elr=0x");
+  printk_hex_u64(tf->elr);
+  uart_puts(" far=0x");
+  printk_hex_u64(tf->far);
+  uart_puts("\n");
+#else
   uart_puts("[fault] ");
   if (t->user.name) {
     uart_puts(t->user.name);
@@ -535,6 +551,7 @@ void thread_user_fault(struct trap_frame *tf) {
   uart_puts(" far=0x");
   printk_hex_u64(tf->far);
   uart_puts("\n");
+#endif
 
   thread_user_trap_redirect(tf, TASK_RETURN_FAULT);
 }
