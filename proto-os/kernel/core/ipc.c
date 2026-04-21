@@ -89,7 +89,7 @@ void ipc_init(void) {
   uint32_t j;
 
   for (i = 0; i < EP_COUNT; i++) {
-    g_endpoints[i].owner_slot = THREAD_SLOT_IDLE;
+    g_endpoints[i].owner_slot = IPC_OWNER_NONE;
     g_endpoints[i].has_pending = 0;
     g_endpoints[i].pending_len = 0;
     for (j = 0; j < IPC_MSG_SIZE; j++) {
@@ -105,6 +105,9 @@ void ipc_init(void) {
   }
 
   g_endpoints[EP_UART].owner_slot = THREAD_SLOT_TASK_B;
+#ifdef BENCH_MODE_LATENCY
+  g_endpoints[EP_BENCH].owner_slot = THREAD_SLOT_TASK_C;
+#endif
 }
 
 void ipc_handle_task_death(uint32_t slot) {
@@ -139,6 +142,9 @@ uint64_t ipc_syscall_call(struct trap_frame *tf) {
   uint64_t delivered;
 
   if (!ep || send_len > IPC_MSG_SIZE) {
+    return (uint64_t)-1;
+  }
+  if (ep->owner_slot == IPC_OWNER_NONE) {
     return (uint64_t)-1;
   }
   if (!el0_buf_range_ok(send_ptr, send_len) || !el0_buf_range_ok(reply_ptr, reply_cap)) {
@@ -186,6 +192,9 @@ uint64_t ipc_syscall_recv(struct trap_frame *tf) {
   if (!ep) {
     return (uint64_t)-1;
   }
+  if (ep->owner_slot == IPC_OWNER_NONE) {
+    return (uint64_t)-1;
+  }
   if (!el0_buf_range_ok(recv_ptr, recv_cap)) {
     return (uint64_t)-1;
   }
@@ -227,6 +236,9 @@ uint64_t ipc_syscall_reply(struct trap_frame *tf) {
   if (!ep || reply_len > IPC_MSG_SIZE) {
     return (uint64_t)-1;
   }
+  if (ep->owner_slot == IPC_OWNER_NONE) {
+    return (uint64_t)-1;
+  }
   if (!el0_buf_range_ok(reply_ptr, reply_len)) {
     return (uint64_t)-1;
   }
@@ -261,6 +273,9 @@ uint64_t ipc_route_uart_write(struct trap_frame *tf, const uint8_t *buf, uint64_
   uint64_t delivered;
 
   if (!ep || len > IPC_MSG_SIZE) {
+    return (uint64_t)-1;
+  }
+  if (ep->owner_slot == IPC_OWNER_NONE) {
     return (uint64_t)-1;
   }
   if (!el0_buf_range_ok(buf, len)) {

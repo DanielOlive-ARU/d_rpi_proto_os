@@ -5,10 +5,12 @@
 #include "kernel/types.h"
 
 #define IPC_MSG_SIZE 256U
+#define IPC_OWNER_NONE 0xFFFFFFFFu
 
 #define EP_NONE 0U
 #define EP_UART 1U
-#define EP_COUNT 2U
+#define EP_BENCH 2U
+#define EP_COUNT 3U
 
 void ipc_init(void);
 void ipc_handle_task_death(uint32_t slot);

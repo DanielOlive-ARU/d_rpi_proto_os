@@ -23,12 +23,24 @@
 #define DEBUG_EARLY 0
 #endif
 
+#define BENCH_ITERATIONS 1000U
+
 #if defined(KERNEL_FLAVOR_MONO)
 #define KERNEL_FLAVOR_STR "MONO"
 #elif defined(KERNEL_FLAVOR_MICRO)
 #define KERNEL_FLAVOR_STR "MICRO"
 #else
 #define KERNEL_FLAVOR_STR "MONO"
+#endif
+
+#if defined(BENCH_MODE_OFF)
+#define BENCH_MODE_STR "OFF"
+#elif defined(BENCH_MODE_LATENCY)
+#define BENCH_MODE_STR "LATENCY"
+#elif defined(BENCH_MODE_RECOVERY)
+#define BENCH_MODE_STR "RECOVERY"
+#else
+#define BENCH_MODE_STR "OFF"
 #endif
 
 /* Future (inactive): user VA layout used once per-process TTBR0 mappings exist.
