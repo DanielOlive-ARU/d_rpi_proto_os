@@ -27,6 +27,7 @@ static const char g_bench_recovery_prefix[] EL0_RODATA = "BENCH test=recovery_wi
 static const char g_bench_mode_field[] EL0_RODATA = " mode=";
 static const char g_bench_flavor_field[] EL0_RODATA = " flavor=";
 static const char g_bench_iter_field[] EL0_RODATA = " iter=";
+static const char g_bench_failures_field[] EL0_RODATA = " failures=";
 static const char g_bench_min_field[] EL0_RODATA = " min_cycles=";
 static const char g_bench_median_field[] EL0_RODATA = " median_cycles=";
 static const char g_bench_max_field[] EL0_RODATA = " max_cycles=";
@@ -208,6 +209,7 @@ static void EL0_TEXT bench_emit_meta_end(uint64_t cntfrq_hz) {
 }
 
 static void EL0_TEXT __attribute__((unused)) bench_emit_latency_result(const char *test_name,
+                                                                       uint64_t failures,
                                                                        uint64_t min_cycles,
                                                                        uint64_t median_cycles,
                                                                        uint64_t max_cycles,
@@ -218,6 +220,8 @@ static void EL0_TEXT __attribute__((unused)) bench_emit_latency_result(const cha
   bench_emit_str(g_bench_flavor_str);
   bench_emit_str(g_bench_iter_field);
   bench_emit_u64(BENCH_ITERATIONS);
+  bench_emit_str(g_bench_failures_field);
+  bench_emit_u64(failures);
   bench_emit_str(g_bench_min_field);
   bench_emit_u64(min_cycles);
   bench_emit_str(g_bench_median_field);
@@ -229,11 +233,14 @@ static void EL0_TEXT __attribute__((unused)) bench_emit_latency_result(const cha
   bench_emit_str(g_bench_newline);
 }
 
-static void EL0_TEXT __attribute__((unused)) bench_emit_recovery_result(uint64_t cycles) {
+static void EL0_TEXT __attribute__((unused)) bench_emit_recovery_result(uint64_t failures,
+                                                                        uint64_t cycles) {
   bench_emit_str(g_bench_recovery_prefix);
   bench_emit_str(g_bench_flavor_str);
   bench_emit_str(g_bench_iter_field);
   bench_emit_u64(1);
+  bench_emit_str(g_bench_failures_field);
+  bench_emit_u64(failures);
   bench_emit_str(g_bench_cycles_field);
   bench_emit_u64(cycles);
   bench_emit_str(g_bench_newline);
@@ -265,6 +272,10 @@ static void EL0_TEXT __attribute__((unused)) bench_sort_u64(uint64_t *samples, u
 static uint64_t EL0_TEXT __attribute__((unused)) bench_median_u64(uint64_t *samples, uint64_t count) {
   uint64_t mid;
 
+  if (count == 0U) {
+    return 0;
+  }
+
   bench_sort_u64(samples, count);
   mid = count / 2U;
   if ((count & 1U) == 0U) {
@@ -275,44 +286,60 @@ static uint64_t EL0_TEXT __attribute__((unused)) bench_median_u64(uint64_t *samp
   return samples[mid];
 }
 
-static void EL0_TEXT __attribute__((unused)) bench_collect_write_samples(uint64_t *samples,
-                                                                         uint64_t *min_cycles,
-                                                                         uint64_t *max_cycles,
-                                                                         uint64_t *total_cycles) {
+static uint64_t EL0_TEXT __attribute__((unused)) bench_collect_write_samples(uint64_t *samples,
+                                                                             uint64_t *min_cycles,
+                                                                             uint64_t *max_cycles,
+                                                                             uint64_t *total_cycles,
+                                                                             uint64_t *failures) {
   uint64_t i;
+  uint64_t success_count = 0;
 
-  *min_cycles = (uint64_t)-1;
+  *min_cycles = 0;
   *max_cycles = 0;
   *total_cycles = 0;
+  *failures = 0;
 
   for (i = 0; i < BENCH_ITERATIONS; i++) {
     uint64_t start = el0_read_cntvct();
     uint64_t retval = el0_write_ret((const char *)(uintptr_t)g_bench_write_payload,
                                     BENCH_WRITE_PAYLOAD_SIZE);
-    uint64_t end = el0_read_cntvct();
-    uint64_t elapsed = (retval == BENCH_WRITE_PAYLOAD_SIZE) ? (end - start) : 0;
+    uint64_t end;
+    uint64_t elapsed;
 
-    samples[i] = elapsed;
+    if (retval != BENCH_WRITE_PAYLOAD_SIZE) {
+      (*failures)++;
+      continue;
+    }
+
+    end = el0_read_cntvct();
+    elapsed = end - start;
+
+    samples[success_count++] = elapsed;
     *total_cycles += elapsed;
-    if (elapsed < *min_cycles) {
+    if (success_count == 1U || elapsed < *min_cycles) {
       *min_cycles = elapsed;
     }
     if (elapsed > *max_cycles) {
       *max_cycles = elapsed;
     }
   }
+
+  return success_count;
 }
 
-static void EL0_TEXT __attribute__((unused)) bench_collect_ipc_samples(uint64_t *samples,
-                                                                       uint8_t *reply_buf,
-                                                                       uint64_t *min_cycles,
-                                                                       uint64_t *max_cycles,
-                                                                       uint64_t *total_cycles) {
+static uint64_t EL0_TEXT __attribute__((unused)) bench_collect_ipc_samples(uint64_t *samples,
+                                                                           uint8_t *reply_buf,
+                                                                           uint64_t *min_cycles,
+                                                                           uint64_t *max_cycles,
+                                                                           uint64_t *total_cycles,
+                                                                           uint64_t *failures) {
   uint64_t i;
+  uint64_t success_count = 0;
 
-  *min_cycles = (uint64_t)-1;
+  *min_cycles = 0;
   *max_cycles = 0;
   *total_cycles = 0;
+  *failures = 0;
 
   for (i = 0; i < BENCH_ITERATIONS; i++) {
     uint64_t start = el0_read_cntvct();
@@ -321,18 +348,28 @@ static void EL0_TEXT __attribute__((unused)) bench_collect_ipc_samples(uint64_t 
                                    BENCH_IPC_PAYLOAD_SIZE,
                                    reply_buf,
                                    BENCH_IPC_PAYLOAD_SIZE);
-    uint64_t end = el0_read_cntvct();
-    uint64_t elapsed = (retval == BENCH_IPC_PAYLOAD_SIZE) ? (end - start) : 0;
+    uint64_t end;
+    uint64_t elapsed;
 
-    samples[i] = elapsed;
+    if (retval != BENCH_IPC_PAYLOAD_SIZE) {
+      (*failures)++;
+      continue;
+    }
+
+    end = el0_read_cntvct();
+    elapsed = end - start;
+
+    samples[success_count++] = elapsed;
     *total_cycles += elapsed;
-    if (elapsed < *min_cycles) {
+    if (success_count == 1U || elapsed < *min_cycles) {
       *min_cycles = elapsed;
     }
     if (elapsed > *max_cycles) {
       *max_cycles = elapsed;
     }
   }
+
+  return success_count;
 }
 
 #ifdef BENCH_MODE_LATENCY
@@ -342,6 +379,8 @@ static void EL0_TEXT bench_run_latency(void) {
   uint64_t cntfrq_hz = el0_read_cntfrq();
   uint64_t samples[BENCH_ITERATIONS];
   uint8_t reply_buf[BENCH_IPC_PAYLOAD_SIZE];
+  uint64_t failures;
+  uint64_t success_count;
   uint64_t min_cycles;
   uint64_t max_cycles;
   uint64_t total_cycles;
@@ -355,17 +394,28 @@ static void EL0_TEXT bench_run_latency(void) {
                      reply_buf,
                      BENCH_IPC_PAYLOAD_SIZE);
 
-  bench_collect_write_samples(samples, &min_cycles, &max_cycles, &total_cycles);
-  median_cycles = bench_median_u64(samples, BENCH_ITERATIONS);
+  success_count = bench_collect_write_samples(samples,
+                                              &min_cycles,
+                                              &max_cycles,
+                                              &total_cycles,
+                                              &failures);
+  median_cycles = bench_median_u64(samples, success_count);
   bench_emit_latency_result(g_bench_test_sys_write,
+                            failures,
                             min_cycles,
                             median_cycles,
                             max_cycles,
                             total_cycles);
 
-  bench_collect_ipc_samples(samples, reply_buf, &min_cycles, &max_cycles, &total_cycles);
-  median_cycles = bench_median_u64(samples, BENCH_ITERATIONS);
+  success_count = bench_collect_ipc_samples(samples,
+                                            reply_buf,
+                                            &min_cycles,
+                                            &max_cycles,
+                                            &total_cycles,
+                                            &failures);
+  median_cycles = bench_median_u64(samples, success_count);
   bench_emit_latency_result(g_bench_test_ipc_roundtrip,
+                            failures,
                             min_cycles,
                             median_cycles,
                             max_cycles,
@@ -384,20 +434,25 @@ static void EL0_TEXT bench_run_recovery(void) __attribute__((noreturn));
 
 static void EL0_TEXT bench_run_recovery(void) {
   uint64_t cntfrq_hz = el0_read_cntfrq();
+  uint64_t failures = 0;
   uint64_t start;
   uint64_t end;
   uint64_t retval;
   uint64_t cycles;
 
   bench_settle();
-  (void)el0_write_ret((const char *)(uintptr_t)g_bench_write_payload, BENCH_WRITE_PAYLOAD_SIZE);
 
   start = el0_read_cntvct();
   retval = el0_write_ret((const char *)(uintptr_t)g_bench_write_payload, BENCH_WRITE_PAYLOAD_SIZE);
-  end = el0_read_cntvct();
-  cycles = (retval == BENCH_WRITE_PAYLOAD_SIZE) ? (end - start) : 0;
+  if (retval == BENCH_WRITE_PAYLOAD_SIZE) {
+    end = el0_read_cntvct();
+    cycles = end - start;
+  } else {
+    cycles = 0;
+    failures = 1;
+  }
 
-  bench_emit_recovery_result(cycles);
+  bench_emit_recovery_result(failures, cycles);
   bench_emit_meta_end(cntfrq_hz);
 
   for (;;) {

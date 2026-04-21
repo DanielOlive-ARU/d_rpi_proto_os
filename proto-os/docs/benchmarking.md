@@ -60,13 +60,13 @@ Benchmark modes emit only structured benchmark lines.
 Latency result lines:
 
 ```text
-BENCH test=<name> flavor=<MONO|MICRO> iter=<N> min_cycles=<N> median_cycles=<N> max_cycles=<N> total_cycles=<N>
+BENCH test=<name> flavor=<MONO|MICRO> iter=<N> failures=<N> min_cycles=<N> median_cycles=<N> max_cycles=<N> total_cycles=<N>
 ```
 
 Recovery result line:
 
 ```text
-BENCH test=recovery_window flavor=MICRO iter=1 cycles=<N>
+BENCH test=recovery_window flavor=MICRO iter=1 failures=<0|1> cycles=<N>
 ```
 
 Metadata lines:
@@ -126,8 +126,12 @@ timeout 16s make recovery-micro-qemu | tee micro_recovery.log
 
 - one `BENCH_META ... phase=start ... flavor=MICRO mode=RECOVERY ...`
 - one `BENCH_META ... phase=fault_injected ... task=task_b ...`
-- one `BENCH test=recovery_window flavor=MICRO iter=1 cycles=...`
+- one `BENCH test=recovery_window flavor=MICRO iter=1 failures=<0|1> cycles=...`
 - one `BENCH_META ... phase=end ...`
+
+`recovery_window` measures the elapsed time of a client routed `SYS_write`
+that spans the crash and supervised restart from the client perspective. In M11
+it is intentionally one sample per boot/run because the injected crash is one-shot.
 
 ## Environment Note
 

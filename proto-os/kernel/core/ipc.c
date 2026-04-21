@@ -275,6 +275,9 @@ uint64_t ipc_route_uart_write(struct trap_frame *tf, const uint8_t *buf, uint64_
   if (!ep || len > IPC_MSG_SIZE) {
     return (uint64_t)-1;
   }
+  if (ep->owner_slot == IPC_OWNER_NONE) {
+    return (uint64_t)-1;
+  }
   if (!el0_buf_range_ok(buf, len)) {
     return (uint64_t)-1;
   }
