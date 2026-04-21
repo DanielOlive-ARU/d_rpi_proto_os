@@ -44,6 +44,24 @@ static void bytes_copy(uint8_t *dst, const uint8_t *src, uint64_t len) {
   }
 }
 
+static void endpoint_clear_pending(struct ipc_endpoint *ep) {
+  ep->has_pending = 0;
+  ep->pending_len = 0;
+}
+
+static void endpoint_clear_caller(struct ipc_endpoint *ep) {
+  ep->blocked_caller_slot = IPC_SLOT_NONE;
+  ep->caller_reply_ptr = 0;
+  ep->caller_reply_cap = 0;
+  ep->caller_result_override = 0;
+}
+
+static void endpoint_clear_receiver(struct ipc_endpoint *ep) {
+  ep->blocked_receiver_slot = IPC_SLOT_NONE;
+  ep->receiver_buf_ptr = 0;
+  ep->receiver_buf_cap = 0;
+}
+
 /* Mirror syscall.c EL0 range checks locally for IPC buffers. */
 static int el0_buf_range_ok(const void *buf, uint64_t len) {
   uintptr_t start;
@@ -89,6 +107,28 @@ void ipc_init(void) {
   g_endpoints[EP_UART].owner_slot = THREAD_SLOT_TASK_B;
 }
 
+void ipc_handle_task_death(uint32_t slot) {
+  uint32_t i;
+
+  for (i = 0; i < EP_COUNT; i++) {
+    struct ipc_endpoint *ep = &g_endpoints[i];
+
+    if (ep->blocked_receiver_slot == (int32_t)slot) {
+      endpoint_clear_receiver(ep);
+    }
+
+    if (ep->owner_slot == slot && ep->blocked_caller_slot != IPC_SLOT_NONE) {
+      thread_user_wake_with_x0((uint32_t)ep->blocked_caller_slot, (uint64_t)-1);
+      endpoint_clear_caller(ep);
+      endpoint_clear_pending(ep);
+      thread_request_resched();
+    } else if (ep->blocked_caller_slot == (int32_t)slot) {
+      endpoint_clear_caller(ep);
+      endpoint_clear_pending(ep);
+    }
+  }
+}
+
 uint64_t ipc_syscall_call(struct trap_frame *tf) {
   struct ipc_endpoint *ep = get_endpoint(tf->x[0]);
   const uint8_t *send_ptr = (const uint8_t *)(uintptr_t)tf->x[1];
@@ -122,9 +162,7 @@ uint64_t ipc_syscall_call(struct trap_frame *tf) {
     }
 
     thread_user_wake_with_x0((uint32_t)ep->blocked_receiver_slot, delivered);
-    ep->blocked_receiver_slot = IPC_SLOT_NONE;
-    ep->receiver_buf_ptr = 0;
-    ep->receiver_buf_cap = 0;
+    endpoint_clear_receiver(ep);
     thread_request_resched();
   } else {
     if (send_len > 0) {
@@ -162,8 +200,7 @@ uint64_t ipc_syscall_recv(struct trap_frame *tf) {
     if (delivered > 0) {
       bytes_copy(recv_ptr, ep->pending_msg, delivered);
     }
-    ep->has_pending = 0;
-    ep->pending_len = 0;
+    endpoint_clear_pending(ep);
     return delivered;
   }
 
@@ -213,10 +250,7 @@ uint64_t ipc_syscall_reply(struct trap_frame *tf) {
   }
 
   thread_user_wake_with_x0((uint32_t)ep->blocked_caller_slot, wake_ret);
-  ep->blocked_caller_slot = IPC_SLOT_NONE;
-  ep->caller_reply_ptr = 0;
-  ep->caller_reply_cap = 0;
-  ep->caller_result_override = 0;
+  endpoint_clear_caller(ep);
   thread_request_resched();
   return 0;
 }
@@ -249,9 +283,7 @@ uint64_t ipc_route_uart_write(struct trap_frame *tf, const uint8_t *buf, uint64_
     }
 
     thread_user_wake_with_x0((uint32_t)ep->blocked_receiver_slot, delivered);
-    ep->blocked_receiver_slot = IPC_SLOT_NONE;
-    ep->receiver_buf_ptr = 0;
-    ep->receiver_buf_cap = 0;
+    endpoint_clear_receiver(ep);
     thread_request_resched();
   } else {
     if (len > 0) {

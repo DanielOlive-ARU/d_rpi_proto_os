@@ -1,6 +1,7 @@
 #include "kernel/config.h"
 #include "kernel/drivers.h"
 #include "kernel/ipc.h"
+#include "kernel/supervisor.h"
 #include "kernel/syscall.h"
 #include "kernel/thread.h"
 
@@ -65,11 +66,14 @@ uint64_t syscall_dispatch(struct trap_frame *tf, enum syscall_origin origin) {
         return uart_write_direct(buf, len);
       }
 #ifdef KERNEL_FLAVOR_MICRO
-      if (thread_current_user_slot() != THREAD_SLOT_TASK_B) {
-        if (len > IPC_MSG_SIZE) {
-          return (uint64_t)-1;
+      if (origin == SYSCALL_ORIGIN_EL0) {
+        uint32_t slot = thread_current_user_slot();
+        if (slot != THREAD_SLOT_TASK_B && slot != THREAD_SLOT_TASK_C) {
+          if (len > IPC_MSG_SIZE) {
+            return (uint64_t)-1;
+          }
+          return ipc_route_uart_write(tf, (const uint8_t *)(uintptr_t)buf, len);
         }
-        return ipc_route_uart_write(tf, (const uint8_t *)(uintptr_t)buf, len);
       }
 #endif
       return uart_write_direct(buf, len);
@@ -94,6 +98,16 @@ uint64_t syscall_dispatch(struct trap_frame *tf, enum syscall_origin origin) {
         return (uint64_t)-1;
       }
       return ipc_syscall_reply(tf);
+    case SYS_supervise_wait:
+      if (origin != SYSCALL_ORIGIN_EL0) {
+        return (uint64_t)-1;
+      }
+      return supervisor_syscall_wait(tf);
+    case SYS_task_restart:
+      if (origin != SYSCALL_ORIGIN_EL0) {
+        return (uint64_t)-1;
+      }
+      return supervisor_syscall_restart(tf->x[0]);
     default:
       return (uint64_t)-1;
   }

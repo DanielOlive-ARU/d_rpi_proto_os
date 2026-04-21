@@ -16,7 +16,9 @@ enum {
   SYS_exit = 3,
   SYS_ipc_call = 4,
   SYS_ipc_recv = 5,
-  SYS_ipc_reply = 6
+  SYS_ipc_reply = 6,
+  SYS_supervise_wait = 7,
+  SYS_task_restart = 8
 };
 
 uint64_t syscall_dispatch(struct trap_frame *tf, enum syscall_origin origin);

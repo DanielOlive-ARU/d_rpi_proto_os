@@ -1,12 +1,17 @@
 #include "kernel/ipc.h"
 #include "kernel/syscall.h"
+#include "kernel/thread.h"
 #include "kernel/types.h"
 
 #define EL0_TEXT __attribute__((section(".el0_sandbox.text"), used))
 #define EL0_RODATA __attribute__((section(".el0_sandbox.rodata"), used))
+#define EL0_DATA __attribute__((section(".el0_sandbox.data"), used))
 
 static const char g_task_a_msg[] EL0_RODATA = "A\n";
 static const char g_uart_ready_msg[] EL0_RODATA = "[uart] ready\n";
+static const char g_sup_ready_msg[] EL0_RODATA = "[sup] ready\n";
+static const char g_sup_restarted_msg[] EL0_RODATA = "[sup] restarted uart\n";
+static int g_uart_server_crashed_once EL0_DATA = 0;
 
 static inline uint64_t el0_syscall2(uint64_t nr, uint64_t arg0, uint64_t arg1) {
   register uint64_t x0 asm("x0") = arg0;
@@ -57,12 +62,21 @@ static inline uint64_t el0_ipc_reply(uint64_t ep_id, const void *reply_ptr, uint
   return el0_syscall3(SYS_ipc_reply, ep_id, (uint64_t)(uintptr_t)reply_ptr, reply_len);
 }
 
+static inline uint64_t el0_supervise_wait(void) {
+  return el0_syscall2(SYS_supervise_wait, 0, 0);
+}
+
+static inline uint64_t el0_task_restart(uint64_t slot) {
+  return el0_syscall2(SYS_task_restart, slot, 0);
+}
+
 static inline int tick_reached(uint64_t now, uint64_t target) {
   return (int64_t)(now - target) >= 0;
 }
 
 void __el0_task_a_entry(void) EL0_TEXT __attribute__((noreturn));
 void __el0_task_b_entry(void) EL0_TEXT __attribute__((noreturn));
+void __el0_task_c_entry(void) EL0_TEXT __attribute__((noreturn));
 
 void __el0_task_a_entry(void) {
   uint64_t next = el0_time_ticks() + 200ULL;
@@ -87,7 +101,23 @@ void __el0_task_b_entry(void) {
     if (recv_len != (uint64_t)-1) {
       (void)el0_write((const char *)recv_buf, recv_len);
       (void)el0_ipc_reply(EP_UART, recv_buf, 0);
+      if (!g_uart_server_crashed_once) {
+        g_uart_server_crashed_once = 1;
+        asm volatile("brk #0");
+      }
     }
-    el0_yield();
+  }
+}
+
+void __el0_task_c_entry(void) {
+  (void)el0_write(g_sup_ready_msg, sizeof(g_sup_ready_msg) - 1);
+
+  for (;;) {
+    uint64_t slot = el0_supervise_wait();
+    if (slot == THREAD_SLOT_TASK_B) {
+      if (el0_task_restart(THREAD_SLOT_TASK_B) == 0) {
+        (void)el0_write(g_sup_restarted_msg, sizeof(g_sup_restarted_msg) - 1);
+      }
+    }
   }
 }

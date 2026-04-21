@@ -39,6 +39,8 @@ build: flavor-check $(KERNEL_ELF) $(KERNEL_IMG)
 flavor-check:
 	@mkdir -p $(BUILD_DIR)
 	@if [ ! -f $(FLAVOR_STAMP) ] || [ "$$(cat $(FLAVOR_STAMP))" != "$(KERNEL_FLAVOR)" ]; then \
+		rm -rf $(BUILD_DIR); \
+		mkdir -p $(BUILD_DIR); \
 		printf "%s\n" "$(KERNEL_FLAVOR)" > $(FLAVOR_STAMP); \
 	fi
 

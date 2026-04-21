@@ -2,8 +2,10 @@
 #include "kernel/config.h"
 #include "kernel/drivers.h"
 #include "kernel/el0.h"
+#include "kernel/ipc.h"
 #include "kernel/panic.h"
 #include "kernel/printk.h"
+#include "kernel/supervisor.h"
 #include "kernel/thread.h"
 
 #define THREAD_STACK_SIZE 4096U
@@ -12,9 +14,12 @@ extern char __el0_task_a_stack_bottom;
 extern char __el0_task_a_stack_top;
 extern char __el0_task_b_stack_bottom;
 extern char __el0_task_b_stack_top;
+extern char __el0_task_c_stack_bottom;
+extern char __el0_task_c_stack_top;
 extern char __el0_sandbox_end;
 extern void __el0_task_a_entry(void);
 extern void __el0_task_b_entry(void);
+extern void __el0_task_c_entry(void);
 
 static struct thread g_threads[THREAD_COUNT];
 static struct thread *g_current = 0;
@@ -26,6 +31,7 @@ static volatile uint32_t g_resched_pending = 0;
 
 __attribute__((aligned(16))) static uint8_t g_stack_task_a[THREAD_STACK_SIZE];
 __attribute__((aligned(16))) static uint8_t g_stack_task_b[THREAD_STACK_SIZE];
+__attribute__((aligned(16))) static uint8_t g_stack_task_c[THREAD_STACK_SIZE];
 __attribute__((aligned(16))) static uint8_t g_stack_idle[THREAD_STACK_SIZE];
 
 static __attribute__((noreturn)) void thread_entry_user_task(void *arg);
@@ -57,6 +63,9 @@ static void validate_el0_layout(void) {
   uintptr_t sandbox_end = (uintptr_t)&__el0_sandbox_end;
   uintptr_t task_a_entry = (uintptr_t)&__el0_task_a_entry;
   uintptr_t task_b_entry = (uintptr_t)&__el0_task_b_entry;
+  uintptr_t task_c_entry = (uintptr_t)&__el0_task_c_entry;
+  uintptr_t task_c_bottom = (uintptr_t)&__el0_task_c_stack_bottom;
+  uintptr_t task_c_top = (uintptr_t)&__el0_task_c_stack_top;
   uintptr_t task_a_bottom = (uintptr_t)&__el0_task_a_stack_bottom;
   uintptr_t task_a_top = (uintptr_t)&__el0_task_a_stack_top;
   uintptr_t task_b_bottom = (uintptr_t)&__el0_task_b_stack_bottom;
@@ -74,7 +83,12 @@ static void validate_el0_layout(void) {
     panic("task_b entry outside EL0 code region");
   }
 
-  if (task_a_bottom != EL0_TASK_A_STACK_BOTTOM || task_a_top != EL0_TASK_A_STACK_TOP ||
+  if (task_c_entry < EL0_SANDBOX_BASE || task_c_entry >= EL0_CODE_END) {
+    panic("task_c entry outside EL0 code region");
+  }
+
+  if (task_c_bottom != EL0_TASK_C_STACK_BOTTOM || task_c_top != EL0_TASK_C_STACK_TOP ||
+      task_a_bottom != EL0_TASK_A_STACK_BOTTOM || task_a_top != EL0_TASK_A_STACK_TOP ||
       task_b_bottom != EL0_TASK_B_STACK_BOTTOM || task_b_top != EL0_TASK_B_STACK_TOP) {
     panic("EL0 stack symbol mismatch");
   }
@@ -241,6 +255,9 @@ __attribute__((noinline)) void user_task_return_step(void) {
   } else if (t->user.return_reason == TASK_RETURN_IPC_BLOCK) {
     t->user.state = TASK_BLOCKED;
     t->state = THREAD_RUNNABLE;
+  } else if (t->user.return_reason == TASK_RETURN_NOTIFY_BLOCK) {
+    t->user.state = TASK_BLOCKED;
+    t->state = THREAD_RUNNABLE;
   } else if (t->user.return_reason == TASK_RETURN_EXIT ||
              t->user.return_reason == TASK_RETURN_FAULT) {
     if (t->user.return_reason == TASK_RETURN_EXIT) {
@@ -254,6 +271,8 @@ __attribute__((noinline)) void user_task_return_step(void) {
     }
     t->user.state = TASK_DEAD;
     t->state = THREAD_STOPPED;
+    ipc_handle_task_death(t->slot);
+    supervisor_note_task_death(t->slot);
   } else {
     panic("unknown user return reason");
   }
@@ -303,6 +322,37 @@ struct user_task_ctx *thread_current_user_ctx(void) {
     panic("user resume ELR outside sandbox");
   }
   return &t->user.ctx;
+}
+
+int thread_user_restart(uint32_t slot) {
+  struct thread *t;
+  uint64_t entry;
+  uint64_t user_sp;
+  const char *name;
+
+  if (slot >= THREAD_COUNT) {
+    return -1;
+  }
+
+  t = &g_threads[slot];
+  if (t->kind != THREAD_USER_TASK) {
+    return -1;
+  }
+  if (t->user.state != TASK_DEAD || t->state != THREAD_STOPPED) {
+    return -1;
+  }
+
+  entry = t->user.user_entry;
+  user_sp = t->user.user_sp;
+  name = t->user.name;
+  if (!entry || !user_sp || !name) {
+    return -1;
+  }
+
+  user_task_init(t, name, entry, user_sp);
+  t->state = THREAD_RUNNABLE;
+  thread_request_resched();
+  return 0;
 }
 
 void thread_user_wake_with_x0(uint32_t slot, uint64_t retval) {
@@ -370,6 +420,19 @@ void thread_system_init(void) {
                  "task_b",
                  (uint64_t)(uintptr_t)&__el0_task_b_entry,
                  (uint64_t)(uintptr_t)&__el0_task_b_stack_top);
+
+  thread_init_slot(&g_threads[THREAD_SLOT_TASK_C],
+                   THREAD_SLOT_TASK_C,
+                   THREAD_USER_TASK,
+                   "task_c_thread",
+                   thread_entry_user_task,
+                   &g_threads[THREAD_SLOT_TASK_C],
+                   g_stack_task_c,
+                   THREAD_STACK_SIZE);
+  user_task_init(&g_threads[THREAD_SLOT_TASK_C],
+                 "task_c",
+                 (uint64_t)(uintptr_t)&__el0_task_c_entry,
+                 (uint64_t)(uintptr_t)&__el0_task_c_stack_top);
 
   thread_init_slot(&g_threads[THREAD_SLOT_IDLE],
                    THREAD_SLOT_IDLE,
