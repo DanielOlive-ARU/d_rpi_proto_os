@@ -11,11 +11,13 @@ This is **not** the bare-metal Pi 4 port. That work lives on the
 
 ## What's in this folder
 
-| File           | Purpose                                                                 |
-| -------------- | ----------------------------------------------------------------------- |
-| `setup_pi.sh`  | One-time, online: installs QEMU + cross-named toolchain, builds kernel. |
-| `run_demo.sh`  | Repeatable, offline: loops the MICRO demo on a banner-clear-restart cycle. |
-| `README.md`    | This file.                                                              |
+| File                          | Purpose                                                                 |
+| ----------------------------- | ----------------------------------------------------------------------- |
+| `setup_pi.sh`                 | One-time, online: installs QEMU + cross-named toolchain, builds kernel. |
+| `run_demo.sh`                 | Repeatable, offline: loops the MICRO demo. Calls the presenter. |
+| `presenter.py`                | Python 3 stdlib-only presentation layer — frames, colorizes, and narrates the demo. Runs in three modes (`live`, `preroll`, `postroll`). |
+| `assets/bench_baseline.txt`   | Frozen MONO/MICRO benchmark medians (from commit `d154dcb`) used by the postroll slide and title subtitle for quantitative grounding. |
+| `README.md`                   | This file.                                                              |
 
 ## Hardware required
 
@@ -109,10 +111,24 @@ without further network access.
 ./run_demo.sh
 ```
 
-The screen clears, a banner explains what to look for, then QEMU
-boots the MICRO kernel. Each cycle runs ~15 seconds (enough for the
-crash + restart sequence and a few `[tick]` markers), pauses ~5
-seconds, then restarts.
+Each iteration goes through three framed screens:
+
+1. **Pre-roll slide** — ASCII architecture diagram of `task_a` /
+   `uart_server` / `supervisor` with a bullet list of what's about to
+   happen; holds for ~3 seconds with a live countdown.
+2. **Live view** — the MICRO kernel runs under qemu for
+   `DEMO_DURATION` seconds. The visitor sees a framed, colorized
+   kernel log with a six-station event-timeline rail
+   (`boot → uart → sup → FAULT → restart → OK`) above it and a dim
+   stats subtitle showing the frozen MONO-vs-MICRO baseline cycles
+   and the session restart counter.
+3. **Post-roll slide** — a ✔/✖ recap of the arc that just played,
+   plus two dim tail lines showing session totals and the frozen
+   benchmark baseline. Holds for `DEMO_POSTROLL` seconds (defaults
+   to `PAUSE_BETWEEN`).
+
+The transitions stay framed with the same title bar throughout, so
+the visitor never sees a bare shell prompt between iterations.
 
 Stop with **Ctrl+C**.
 
@@ -178,24 +194,58 @@ seconds of plugging in the cable to find the Pi's link-local IP.
 | QEMU starts but immediately exits | Toolchain issue produced an unbootable kernel | `make clean` then re-run `setup_pi.sh` |
 | Tick output very slow (one tick every several seconds) | TCG emulation overhead — expected | This is normal for QEMU-on-Pi. Demo cadence is still meaningful. |
 | Banner garbled / wrong size | Terminal too small | Resize the SSH client or use a larger HDMI resolution |
+| Timeline rail squashes to glyphs only | Terminal < ~60 cols wide | Expected — labels drop so the rail still fits |
+| Screen looks scrambled in a minimal terminal | Terminal does not support the alt-screen / cursor-positioning codes | `DEMO_PLAIN=1 ./run_demo.sh` falls back to plain colorized output |
+| Unicode box / check / arrow glyphs show as `?` | Terminal not UTF-8 | Set `LANG=C.UTF-8` (or `en_GB.UTF-8`); Pi OS Lite defaults are fine |
+| Stats / counters stuck at zero | Permission error writing `.state/counters.json` | Check `ls -la pi4/demo/.state/` and fix perms, or override `DEMO_STATE_FILE` to a writable path |
 
 ## Customising the demo
 
-`run_demo.sh` honours four environment variables:
+`run_demo.sh` and `presenter.py` honour these environment variables:
 
-| Variable        | Default      | Purpose |
-| --------------- | ------------ | ------- |
-| `DEMO_DURATION` | `15`         | Seconds each QEMU iteration runs before being killed. |
-| `PAUSE_BETWEEN` | `5`          | Seconds between iterations (loop pause). |
-| `ACCEL`         | `tcg`        | QEMU accelerator. Set to `kvm` to try hardware acceleration if it becomes available. |
-| `CPU`           | `cortex-a57` | Guest CPU model. Use `host` only with `ACCEL=kvm`. |
+| Variable              | Default       | Purpose |
+| --------------------- | ------------- | ------- |
+| `DEMO_DURATION`       | `20`          | Seconds each QEMU iteration runs before being killed. |
+| `PAUSE_BETWEEN`       | `5`           | Legacy inter-iteration pause; maps to `DEMO_POSTROLL` when the latter is unset. |
+| `DEMO_PREROLL`        | `3`           | Seconds to hold the pre-run architecture slide. |
+| `DEMO_POSTROLL`       | `PAUSE_BETWEEN` | Seconds to hold the post-run recap slide. |
+| `ACCEL`               | unset         | QEMU accelerator. Set to `kvm` to try hardware acceleration if it becomes available. |
+| `CPU`                 | `cortex-a57`  | Guest CPU model. Use `host` only with `ACCEL=kvm`. |
+| `DEMO_PLAIN`          | unset         | `1` to force raw pass-through (no ANSI, no chrome, no slides). Useful when running inside pipelines or older terminals. |
+| `NO_COLOR`            | unset         | Standard convention — any non-empty value disables color (framing stays). |
+| `DEMO_NO_FRAME`       | unset         | `1` to keep colorization but drop the framed chrome + timeline + slides. |
+| `DEMO_RESET_COUNTERS` | unset         | `1` to reset the cross-iteration counters at the top of the loop and then continue normally. |
+| `DEMO_STATE_FILE`     | `.state/counters.json` (next to `presenter.py`) | Where cross-iteration counters are persisted. |
+| `DEMO_BENCH_FILE`     | `assets/bench_baseline.txt` (next to `presenter.py`) | Frozen MONO/MICRO benchmark summary read by the presenter. |
 
 Examples:
 
 ```bash
-DEMO_DURATION=20 ./run_demo.sh
-ACCEL=kvm CPU=host ./run_demo.sh   # if KVM ever works on this Pi
+DEMO_DURATION=25 ./run_demo.sh
+DEMO_RESET_COUNTERS=1 ./run_demo.sh        # zero the session counters
+DEMO_PLAIN=1 ./run_demo.sh                 # fallback on narrow / non-ANSI terminals
+ACCEL=kvm CPU=host ./run_demo.sh           # if KVM ever works on this Pi
 ```
+
+### Cross-iteration counters
+
+`presenter.py` maintains a small JSON state file at
+`.state/counters.json` (gitignored) that tracks the number of
+iterations completed, `[fault]` lines observed, and `[sup] restarted`
+lines observed. The title-bar subtitle and the post-roll tail surface
+these so a visitor arriving mid-day sees evidence of sustained
+stability. Delete the file (or set `DEMO_RESET_COUNTERS=1`) to start
+fresh.
+
+### Frozen benchmark numbers
+
+The kernel is built with `BENCH_MODE=OFF` so no live measurements are
+emitted — the wow is behavioural, not numeric. To ground reviewers in
+actual measurements, `presenter.py` loads a small snapshot of the
+M11 benchmark session from `assets/bench_baseline.txt`
+(median-of-run-medians at commit `d154dcb`, tagged
+`bench_baseline_qemu`). See that file's header comment for the exact
+source and caveats.
 
 ## What's NOT in this branch
 
