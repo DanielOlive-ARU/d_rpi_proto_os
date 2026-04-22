@@ -73,11 +73,17 @@ run_once() {
   local rc=$?
   set -e
 
-  # rc 124 = timeout killed it (expected); rc 0 = clean exit; anything
-  # else is a real qemu failure worth showing.
+  # Clear immediately to wipe qemu's 'terminating on signal' line and
+  # any other ceremonial mentions from the visitor's view. Tradeoff:
+  # the last ~1s of demo output disappears at iteration boundaries.
+  clear
+
+  # rc 124 = timeout killed it (expected); rc 0 = clean exit; rc 143
+  # = SIGTERM (also expected). Anything else is a real failure worth
+  # showing on the cleared screen so we can diagnose at the expo.
   if [ "$rc" -ne 0 ] && [ "$rc" -ne 124 ] && [ "$rc" -ne 143 ]; then
     echo
-    echo "(qemu exited rc=$rc — see any error text above)"
+    echo "(demo exited rc=$rc)"
   fi
 }
 
@@ -87,6 +93,6 @@ while true; do
   print_banner
   run_once
   echo
-  echo "(restarting in ${PAUSE_BETWEEN}s — Ctrl+C to stop)"
+  echo "(next demo in ${PAUSE_BETWEEN}s — Ctrl+C to stop)"
   sleep "$PAUSE_BETWEEN"
 done
