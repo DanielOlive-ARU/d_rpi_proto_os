@@ -22,6 +22,8 @@ Environment:
                         (default ``<presenter_dir>/.state/counters.json``).
   DEMO_RESET_COUNTERS   if '1', ignore any existing state and start counting
                         from zero for this invocation.
+  DEMO_BENCH_FILE       path to the frozen benchmark summary file
+                        (default ``<presenter_dir>/assets/bench_baseline.txt``).
 
 Exit codes:
   0  stdin EOF (live), slide hold elapsed (preroll/postroll),
@@ -238,10 +240,89 @@ def _format_counters_long(state: Optional[Dict[str, Any]]) -> str:
     )
 
 
+# ----- frozen benchmark baseline --------------------------------------------
+
+# The presenter does not measure at runtime (BENCH_MODE=OFF kernel).
+# Instead it reads a small key=value snapshot extracted from the frozen
+# benchmark session at commit d154dcb so reviewers see quantitative
+# evidence alongside the qualitative demo. See
+# ``assets/bench_baseline.txt`` for the source and caveats.
+
+
+def _bench_file() -> Path:
+    override = os.environ.get("DEMO_BENCH_FILE", "").strip()
+    if override:
+        return Path(override)
+    return Path(__file__).resolve().parent / "assets" / "bench_baseline.txt"
+
+
+def _load_bench() -> Optional[Dict[str, str]]:
+    path = _bench_file()
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except (FileNotFoundError, OSError):
+        return None
+    parsed: Dict[str, str] = {}
+    for line in lines:
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        if "=" not in stripped:
+            continue
+        key, value = stripped.split("=", 1)
+        parsed[key.strip()] = value.strip()
+    return parsed or None
+
+
+def _format_bench_summary(bench: Optional[Dict[str, str]]) -> str:
+    if not bench:
+        return ""
+    mono = bench.get("mono_sys_write_cycles")
+    micro = bench.get("micro_sys_write_cycles")
+    recov = bench.get("recovery_window_cycles")
+    if not (mono and micro and recov):
+        return ""
+    try:
+        recov_k = int(recov) // 1000
+    except ValueError:
+        return ""
+    return (
+        f"sys_write: MONO {mono} \u00b7 MICRO {micro} cyc \u00b7 "
+        f"recovery ~{recov_k}k cyc"
+    )
+
+
+def _format_bench_long(bench: Optional[Dict[str, str]]) -> str:
+    """Single-line form suitable for the postroll tail. Sized to fit the
+    76-char content width of a 24x80 terminal; wider terminals pad the
+    slack with frame whitespace."""
+    if not bench:
+        return ""
+    mono = bench.get("mono_sys_write_cycles")
+    micro = bench.get("micro_sys_write_cycles")
+    recov = bench.get("recovery_window_cycles")
+    commit = bench.get("source_commit", "?")
+    if not (mono and micro and recov):
+        return ""
+    try:
+        recov_k = int(recov) // 1000
+    except ValueError:
+        return ""
+    return (
+        f"Frozen baseline ({commit}): MONO {mono} cyc \u00b7 "
+        f"MICRO {micro} cyc \u00b7 recovery ~{recov_k}k cyc"
+    )
+
+
 # ----- shared chrome drawing ------------------------------------------------
 
 
-def _draw_title_bar(out, cols: int, state: Optional[Dict[str, Any]] = None) -> None:
+def _draw_title_bar(
+    out,
+    cols: int,
+    state: Optional[Dict[str, Any]] = None,
+    bench: Optional[Dict[str, str]] = None,
+) -> None:
     # Row 1 — centered inverse-video title
     title = _TITLE[:cols] if len(_TITLE) > cols else _TITLE
     pad_left = max(0, (cols - len(title)) // 2)
@@ -249,13 +330,29 @@ def _draw_title_bar(out, cols: int, state: Optional[Dict[str, Any]] = None) -> N
     out.write(_goto(1, 1) + _INVERSE)
     out.write(" " * pad_left + title + " " * pad_right)
     out.write(_RESET)
-    # Row 2 — blank, or right-aligned dim counter subtitle if state given
-    counters = _format_counters(state)
-    if counters and len(counters) + 2 < cols:
-        pad = cols - len(counters) - 2
-        out.write(_goto(2, 1) + " " * pad + _DIM + counters + _RESET + "  ")
-    else:
-        out.write(_goto(2, 1) + " " * cols)
+
+    # Row 2 — compact dim stats row. Frozen baseline on the left,
+    # session counters on the right. Either can be dropped if the row
+    # is too narrow to fit both cleanly.
+    out.write(_goto(2, 1) + " " * cols)
+    bench_text = _format_bench_summary(bench)
+    counters_text = _format_counters(state)
+
+    min_gap = 4
+    can_fit_both = (
+        bench_text
+        and counters_text
+        and (len(bench_text) + len(counters_text) + min_gap + 4) <= cols
+    )
+    if can_fit_both:
+        out.write(_goto(2, 3) + _DIM + bench_text + _RESET)
+        right_start = cols - len(counters_text) - 1
+        out.write(_goto(2, right_start) + _DIM + counters_text + _RESET)
+    elif counters_text and (len(counters_text) + 4) <= cols:
+        right_start = cols - len(counters_text) - 1
+        out.write(_goto(2, right_start) + _DIM + counters_text + _RESET)
+    elif bench_text and (len(bench_text) + 4) <= cols:
+        out.write(_goto(2, 3) + _DIM + bench_text + _RESET)
 
 
 def _draw_outer_frame(out, rows: int, cols: int, embedded_title: str = "") -> None:
@@ -323,7 +420,12 @@ class Chrome:
     state back if the iteration actually produced output.
     """
 
-    def __init__(self, color: bool, state: Dict[str, Any]) -> None:
+    def __init__(
+        self,
+        color: bool,
+        state: Dict[str, Any],
+        bench: Optional[Dict[str, str]] = None,
+    ) -> None:
         self.color = color
         self.stdout = sys.stdout
         self.rows, self.cols = _detect_size()
@@ -331,6 +433,7 @@ class Chrome:
         self.log_lines: Deque[str] = collections.deque(maxlen=self.content_height)
         self._resize_pending = False
         self.state = state
+        self.bench = bench
         self._saw_any_line = False
 
     def _recompute_layout(self) -> None:
@@ -368,11 +471,11 @@ class Chrome:
     def _erase_and_draw_static(self) -> None:
         out = self.stdout
         out.write(_CLEAR)
-        _draw_title_bar(out, self.cols, self.state)
+        _draw_title_bar(out, self.cols, self.state, self.bench)
         _draw_outer_frame(out, self.rows, self.cols, embedded_title=_FRAME_TITLE_LIVE)
 
     def _redraw_title(self) -> None:
-        _draw_title_bar(self.stdout, self.cols, self.state)
+        _draw_title_bar(self.stdout, self.cols, self.state, self.bench)
 
     def _fit_content(self, raw: str) -> str:
         stripped = raw.rstrip("\r\n")
@@ -491,15 +594,17 @@ def _render_slide(
     duration: int,
     color: bool,
     state: Optional[Dict[str, Any]] = None,
-    tail_line: Optional[str] = None,
+    bench: Optional[Dict[str, str]] = None,
+    tail_lines: Optional[List[str]] = None,
 ) -> int:
     """Draw the title bar + outer frame, then render `body` centered
     inside the content area, with a live countdown footer. Holds for
     `duration` seconds. Restores cursor and clears the screen on exit.
 
-    If ``state`` is provided, the stats subtitle is rendered on row 2.
-    If ``tail_line`` is provided, it is rendered at the bottom of the
-    body block (after a spacer row), centered on its own visible length."""
+    If ``state`` or ``bench`` is provided, the stats subtitle row is
+    rendered on row 2. If ``tail_lines`` is non-empty, each is rendered
+    on its own row below the body (after a spacer row), centered on
+    its own visible length."""
     rows, cols = _detect_size()
     out = sys.stdout
 
@@ -517,7 +622,7 @@ def _render_slide(
 
     out.write(_HIDE_CURSOR)
     out.write(_CLEAR)
-    _draw_title_bar(out, cols, state)
+    _draw_title_bar(out, cols, state, bench)
     _draw_outer_frame(out, rows, cols)
 
     # Block-level horizontal centering — use the widest body line so that
@@ -536,13 +641,19 @@ def _render_slide(
         colored = _colorize_slide_line(line, color)
         out.write(_goto(row, 3 + block_left_pad) + colored)
 
-    # Optional tail line rendered on its own row below the body, centered.
-    if tail_line:
-        tail_row = content_top + top_pad + len(visible_body) + 1
-        if tail_row < content_bottom:
-            visible = _visible_len(tail_line)
+    # Optional tail lines rendered below the body, each centered.
+    if tail_lines:
+        start_row = content_top + top_pad + len(visible_body) + 1
+        for i, line in enumerate(tail_lines):
+            row = start_row + i
+            if row >= content_bottom:
+                break
+            visible = _visible_len(line)
+            if visible > content_width:
+                line = line[:content_width]
+                visible = content_width
             pad_left = max(0, (content_width - visible) // 2)
-            out.write(_goto(tail_row, 3 + pad_left) + _DIM + tail_line + _RESET)
+            out.write(_goto(row, 3 + pad_left) + _DIM + line + _RESET)
 
     # Footer countdown
     footer_row = content_bottom
@@ -592,8 +703,9 @@ def cmd_live() -> int:
     color = _color_enabled()
     framed = _frame_enabled()
     state = _load_state()
+    bench = _load_bench()
 
-    chrome = Chrome(color=color, state=state) if framed else None
+    chrome = Chrome(color=color, state=state, bench=bench) if framed else None
     _install_signal_handlers(chrome)
 
     stdin_bin = sys.stdin.buffer
@@ -637,12 +749,14 @@ def cmd_preroll() -> int:
     _install_signal_handlers(None)
     duration = _env_int("DEMO_PREROLL", 3)
     state = _load_state()
+    bench = _load_bench()
     return _render_slide(
         body=_PREROLL_BODY,
         footer_template="starting in {n} second{s}...",
         duration=duration,
         color=_color_enabled(),
         state=state,
+        bench=bench,
     )
 
 
@@ -652,16 +766,24 @@ def cmd_postroll() -> int:
     _install_signal_handlers(None)
     duration = _env_int("DEMO_POSTROLL", 5)
     state = _load_state()
-    # Show session totals underneath the recap body so the evidence of
-    # accumulated successful restarts is visible at every iteration end.
-    tail = _format_counters_long(state) if int(state.get("iterations", 0)) > 0 else None
+    bench = _load_bench()
+    # Build tail lines: session totals (once we've done any iterations)
+    # plus the frozen benchmark baseline as quantitative grounding for
+    # the qualitative recap above.
+    tail_lines: List[str] = []
+    if int(state.get("iterations", 0)) > 0:
+        tail_lines.append(_format_counters_long(state))
+    bench_line = _format_bench_long(bench)
+    if bench_line:
+        tail_lines.append(bench_line)
     return _render_slide(
         body=_POSTROLL_BODY,
         footer_template="next run in {n} second{s}...",
         duration=duration,
         color=_color_enabled(),
         state=state,
-        tail_line=tail,
+        bench=bench,
+        tail_lines=tail_lines or None,
     )
 
 
