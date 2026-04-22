@@ -63,8 +63,6 @@ _ALT_SCREEN_ON = "\x1b[?1049h"
 _ALT_SCREEN_OFF = "\x1b[?1049l"
 _CLEAR = "\x1b[2J"
 
-_FG_GREEN = "\x1b[32m"
-_FG_RED = "\x1b[31m"
 
 
 def _goto(row: int, col: int) -> str:
@@ -677,30 +675,18 @@ _POSTROLL_BODY: List[str] = [
     "",
     "  A user-space service just crashed — and the system kept running.",
     "",
-    "    ✔ BOOT                       kernel started",
-    "    ✔ [uart] ready               UART service up (user space)",
-    "    ✔ [sup] ready                supervisor up (user space)",
-    "    ✖ [fault] task_b dead        uart_server faulted (on purpose)",
-    "    ✔ [sup] restarted uart       supervisor restarted the service",
-    "    ✔ [uart] ready (again)       service resumed — no kernel reboot",
-    "    ✔ A (continues)              writer task never stopped",
+    "      BOOT                       kernel started",
+    "      [uart] ready               UART service up (user space)",
+    "      [sup] ready                supervisor up (user space)",
+    "      [fault] task_b dead        uart_server faulted (on purpose)",
+    "      [sup] restarted uart       supervisor restarted the service",
+    "      [uart] ready (again)       service resumed — no kernel reboot",
+    "      A (continues)              writer task never stopped",
     "",
     "",
     "  The microkernel contained the fault in user space.",
     "  A monolithic equivalent would panic or reboot on the same crash.",
 ]
-
-
-def _colorize_slide_line(line: str, color: bool) -> str:
-    """Apply minimal color to ✔/✖ glyphs on the recap slide."""
-    if not color:
-        return line
-    out = line
-    if "\u2714" in out:
-        out = out.replace("\u2714", f"{_FG_GREEN}\u2714{_RESET}")
-    if "\u2716" in out:
-        out = out.replace("\u2716", f"{_FG_RED}\u2716{_RESET}")
-    return out
 
 
 def _visible_len(s: str) -> int:
@@ -761,8 +747,7 @@ def _render_slide(
         visible = _visible_len(line)
         if visible > content_width:
             line = line[:content_width]
-        colored = _colorize_slide_line(line, color)
-        out.write(_goto(row, 3 + block_left_pad) + colored)
+        out.write(_goto(row, 3 + block_left_pad) + line)
 
     # Optional tail lines rendered below the body, each centered.
     if tail_lines:
