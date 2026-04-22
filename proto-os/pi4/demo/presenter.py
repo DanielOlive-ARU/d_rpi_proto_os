@@ -355,12 +355,21 @@ def _draw_title_bar(
         out.write(_goto(2, 3) + _DIM + bench_text + _RESET)
 
 
-def _draw_outer_frame(out, rows: int, cols: int, embedded_title: str = "") -> None:
-    """Top border (row 3), bottom border (row `rows`), side borders on
-    all content rows. If `embedded_title` is non-empty it is rendered
-    inside the top border like ``┌── title ──────┐``."""
+def _draw_outer_frame(
+    out,
+    rows: int,
+    cols: int,
+    embedded_title: str = "",
+    top_row: int = 3,
+) -> None:
+    """Top border (``top_row``), bottom border (row `rows`), side
+    borders on all rows between them. If `embedded_title` is non-empty
+    it is rendered inside the top border like ``┌── title ──────┐``.
+
+    ``top_row`` is parameterised so the live-mode chrome can reserve
+    row 3 for its event-timeline rail and push the frame down by one."""
     # Top border
-    out.write(_goto(3, 1))
+    out.write(_goto(top_row, 1))
     if embedded_title:
         prefix = "┌── " + embedded_title + " "
         if len(prefix) + 1 > cols:
@@ -374,13 +383,10 @@ def _draw_outer_frame(out, rows: int, cols: int, embedded_title: str = "") -> No
     out.write(_goto(rows, 1))
     out.write("└" + "─" * max(0, cols - 2) + "┘")
 
-    # Side borders + blank content rows
-    content_height = max(0, rows - 4)
-    content_width = max(0, cols - 4)
-    for i in range(content_height):
-        row = 4 + i
+    # Side borders + blank content rows between top_row and rows (exclusive)
+    for row in range(top_row + 1, rows):
         out.write(_goto(row, 1) + "│")
-        if content_width > 0:
+        if cols > 2:
             out.write(_goto(row, 2) + " " * (cols - 2))
         out.write(_goto(row, cols) + "│")
 
@@ -404,6 +410,96 @@ _FAULT_LINE = re.compile(r"^\[fault\]")
 _RESTART_LINE = re.compile(r"^\[sup\] restarted")
 
 
+# ----- event timeline rail (live mode only) ---------------------------------
+
+# Six-step rail that mirrors the M10 recovery arc. Each step is a
+# predicate over a log line; when first satisfied the dot fills and is
+# painted in its "lit" color for the remainder of the iteration.
+
+_TIMELINE_BOOT = re.compile(r"^(?:BOOT$|\[boot\])")
+_TIMELINE_UART_READY = re.compile(r"^\[uart\] ready")
+_TIMELINE_SUP_READY = re.compile(r"^\[sup\] ready")
+
+# (key, label, lit-color). The ok step reuses the [uart] ready pattern
+# but is only eligible after the fault has been seen — handled in the
+# update function below rather than as a standalone regex.
+_TIMELINE_STEPS: List[Tuple[str, str, str]] = [
+    ("boot",    "boot",    "\x1b[32m"),       # green
+    ("uart",    "uart",    "\x1b[32m"),
+    ("sup",     "sup",     "\x1b[32m"),
+    ("fault",   "FAULT",   "\x1b[1;31m"),     # bold red
+    ("restart", "restart", "\x1b[1;96m"),     # bold bright cyan
+    ("ok",      "OK",      "\x1b[1;32m"),     # bold green — service resumed
+]
+
+
+def _initial_timeline_hits() -> Dict[str, bool]:
+    return {key: False for key, _, _ in _TIMELINE_STEPS}
+
+
+def _update_timeline_hits(hits: Dict[str, bool], line: str) -> bool:
+    """Return True if ``line`` advanced any step."""
+    changed = False
+    if not hits["boot"] and _TIMELINE_BOOT.match(line):
+        hits["boot"] = True; changed = True
+    if not hits["uart"] and _TIMELINE_UART_READY.match(line):
+        hits["uart"] = True; changed = True
+    if not hits["sup"] and _TIMELINE_SUP_READY.match(line):
+        hits["sup"] = True; changed = True
+    if not hits["fault"] and _FAULT_LINE.match(line):
+        hits["fault"] = True; changed = True
+    if not hits["restart"] and _RESTART_LINE.match(line):
+        hits["restart"] = True; changed = True
+    # "ok" = any [uart] ready observed AFTER the fault has been hit,
+    # i.e. the service came back online.
+    if hits["fault"] and not hits["ok"] and _TIMELINE_UART_READY.match(line):
+        hits["ok"] = True; changed = True
+    return changed
+
+
+def _render_timeline_rail(out, row: int, cols: int, hits: Dict[str, bool]) -> None:
+    """Draw the six-step rail centered on ``row``. Unlit steps are dim
+    empty circles; lit steps are filled circles in their step's color."""
+    pieces: List[Tuple[str, int]] = []  # (styled_text, visible_width)
+    for key, label, color in _TIMELINE_STEPS:
+        if hits.get(key, False):
+            glyph = "\u25CF"  # filled circle
+            styled = f"{color}{glyph} {label}{_RESET}"
+        else:
+            glyph = "\u25CB"  # empty circle
+            styled = f"{_DIM}{glyph} {label}{_RESET}"
+        visible = 1 + 1 + len(label)  # glyph + space + label
+        pieces.append((styled, visible))
+
+    separator = " \u2500\u2500 "  # `─` dashes as rail between stations
+    sep_len = len(separator)
+    total_visible = sum(v for _, v in pieces) + sep_len * (len(pieces) - 1)
+
+    out.write(_goto(row, 1) + " " * cols)  # clear the rail line
+    if total_visible >= cols:
+        # Degenerate narrow-terminal case: fall back to key-only glyphs
+        # (drop labels) to preserve the story.
+        minimal_visible = len(_TIMELINE_STEPS) + sep_len * (len(_TIMELINE_STEPS) - 1)
+        if minimal_visible >= cols:
+            return
+        pad_left = max(0, (cols - minimal_visible) // 2)
+        out.write(_goto(row, 1 + pad_left))
+        for i, (key, _, color) in enumerate(_TIMELINE_STEPS):
+            glyph = "\u25CF" if hits.get(key, False) else "\u25CB"
+            col_on = color if hits.get(key, False) else _DIM
+            out.write(f"{col_on}{glyph}{_RESET}")
+            if i < len(_TIMELINE_STEPS) - 1:
+                out.write(separator)
+        return
+
+    pad_left = max(0, (cols - total_visible) // 2)
+    out.write(_goto(row, 1 + pad_left))
+    for i, (styled, _) in enumerate(pieces):
+        out.write(styled)
+        if i < len(pieces) - 1:
+            out.write(separator)
+
+
 class Chrome:
     """Full-screen framed layout for the live qemu log.
 
@@ -420,6 +516,16 @@ class Chrome:
     state back if the iteration actually produced output.
     """
 
+    # Row assignments for live-mode chrome:
+    #   row 1             title bar
+    #   row 2             stats subtitle (bench + counters)
+    #   row 3             event timeline rail
+    #   row 4             frame top border
+    #   rows 5..rows-1    framed log content
+    #   row rows          frame bottom border
+    _TIMELINE_ROW = 3
+    _FRAME_TOP_ROW = 4
+
     def __init__(
         self,
         color: bool,
@@ -434,10 +540,12 @@ class Chrome:
         self._resize_pending = False
         self.state = state
         self.bench = bench
+        self.timeline_hits = _initial_timeline_hits()
         self._saw_any_line = False
 
     def _recompute_layout(self) -> None:
-        self.content_height = max(1, self.rows - 4)
+        # Content spans rows (FRAME_TOP_ROW + 1)..(rows - 1) inclusive.
+        self.content_height = max(1, self.rows - self._FRAME_TOP_ROW - 1)
         self.content_width = max(1, self.cols - 4)
 
     def on_sigwinch(self, _signum=None, _frame=None) -> None:  # type: ignore[no-untyped-def]
@@ -472,10 +580,20 @@ class Chrome:
         out = self.stdout
         out.write(_CLEAR)
         _draw_title_bar(out, self.cols, self.state, self.bench)
-        _draw_outer_frame(out, self.rows, self.cols, embedded_title=_FRAME_TITLE_LIVE)
+        _render_timeline_rail(out, self._TIMELINE_ROW, self.cols, self.timeline_hits)
+        _draw_outer_frame(
+            out,
+            self.rows,
+            self.cols,
+            embedded_title=_FRAME_TITLE_LIVE,
+            top_row=self._FRAME_TOP_ROW,
+        )
 
     def _redraw_title(self) -> None:
         _draw_title_bar(self.stdout, self.cols, self.state, self.bench)
+
+    def _redraw_timeline(self) -> None:
+        _render_timeline_rail(self.stdout, self._TIMELINE_ROW, self.cols, self.timeline_hits)
 
     def _fit_content(self, raw: str) -> str:
         stripped = raw.rstrip("\r\n")
@@ -494,7 +612,7 @@ class Chrome:
         out = self.stdout
         lines = list(self.log_lines)
         for i in range(self.content_height):
-            row = 4 + i
+            row = self._FRAME_TOP_ROW + 1 + i
             raw = lines[i] if i < len(lines) else ""
             out.write(_goto(row, 3))
             out.write(self._fit_content(raw))
@@ -514,12 +632,17 @@ class Chrome:
             self.state["restarts_seen"] = int(self.state.get("restarts_seen", 0)) + 1
             state_changed = True
 
+        timeline_changed = _update_timeline_hits(self.timeline_hits, stripped)
+
         self._saw_any_line = True
         self.log_lines.append(stripped)
         self._draw_content()
         if state_changed:
             # Bump the visible subtitle; cheap — 2 rows of redraw.
             self._redraw_title()
+        if timeline_changed:
+            self._redraw_timeline()
+        if state_changed or timeline_changed:
             self.stdout.flush()
 
 
