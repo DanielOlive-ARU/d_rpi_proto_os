@@ -2,10 +2,11 @@
 #
 # proto-os Pi 4 expo demo — repeating MICRO demo runner.
 #
-# Loops the proto-os MICRO kernel. Between each iteration the screen is
-# cleared, a short banner explains what to look for, and the demo runs
-# for DEMO_DURATION seconds (default 20) before the loop pauses
-# PAUSE_BETWEEN seconds (default 5) and restarts.
+# Loops the proto-os MICRO kernel. Each iteration shows a pre-run
+# architecture slide, runs the MICRO kernel under qemu (piped through
+# the presenter layer for framing + coloring) for DEMO_DURATION
+# seconds, then holds a post-run recap slide before starting the next
+# iteration.
 #
 # Stop with Ctrl+C. Skip to the next iteration with Ctrl+A then X.
 #
@@ -14,7 +15,10 @@
 #
 # Optional environment overrides:
 #   DEMO_DURATION  seconds per iteration (default 20)
-#   PAUSE_BETWEEN  seconds between iterations (default 5)
+#   PAUSE_BETWEEN  seconds between iterations (default 5) — also acts as
+#                  the postroll slide hold time unless DEMO_POSTROLL is set
+#   DEMO_PREROLL   seconds to hold the pre-run architecture slide (default 3)
+#   DEMO_POSTROLL  seconds to hold the post-run recap slide (default PAUSE_BETWEEN)
 #   ACCEL          QEMU accelerator. Unset = QEMU's default. Set to
 #                  'kvm' to try hardware acceleration (requires CPU=host).
 #   CPU            guest CPU model (default cortex-a57; use 'host' with KVM)
@@ -53,21 +57,6 @@ if [ ! -f "$PRESENTER" ]; then
   echo "ERROR: presenter not found at $PRESENTER" >&2
   exit 1
 fi
-
-print_banner() {
-  clear
-  cat <<'EOF'
-================================================================
-  proto-os — microkernel fault isolation demo
-================================================================
-  Watch for:
-    [fault] task_b dead     uart_server crashes on purpose
-    [sup] restarted uart    supervisor brings the service back up
-    A continues             service restored without a reboot
-================================================================
-
-EOF
-}
 
 run_once() {
   local args=(-M virt -cpu "$CPU" -m 512M -nographic
@@ -113,10 +102,13 @@ run_once() {
 
 trap 'echo; echo "demo loop stopped"; exit 0' INT TERM
 
+# The legacy PAUSE_BETWEEN envvar becomes the postroll slide hold time
+# when DEMO_POSTROLL is not set explicitly, preserving muscle memory for
+# anyone who had tuned it previously.
+export DEMO_POSTROLL="${DEMO_POSTROLL:-$PAUSE_BETWEEN}"
+
 while true; do
-  print_banner
+  python3 "$PRESENTER" preroll
   run_once
-  echo
-  echo "(next demo in ${PAUSE_BETWEEN}s — Ctrl+C to stop)"
-  sleep "$PAUSE_BETWEEN"
+  python3 "$PRESENTER" postroll
 done
