@@ -65,8 +65,11 @@ run_once() {
     args+=(-accel "$ACCEL")
   fi
 
+  # --foreground keeps qemu in the same process group so it retains
+  # foreground TTY access. Without it, qemu's -serial stdio output is
+  # silently dropped because timeout puts the child in its own group.
   set +e
-  timeout "$DEMO_DURATION" qemu-system-aarch64 "${args[@]}"
+  timeout --foreground "$DEMO_DURATION" qemu-system-aarch64 "${args[@]}"
   local rc=$?
   set -e
 
