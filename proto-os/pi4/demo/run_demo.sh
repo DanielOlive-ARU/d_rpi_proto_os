@@ -1,21 +1,23 @@
 #!/usr/bin/env bash
 #
-# Pi 4 expo demo — repeating MICRO demo runner.
+# proto-os Pi 4 expo demo — repeating MICRO demo runner.
 #
-# Loops the proto-os MICRO kernel under QEMU virt cortex-a57. Between each
-# iteration the screen is cleared, a brief banner explains what to look
-# for, then QEMU runs for DEMO_DURATION seconds (default 15) before the
-# loop pauses PAUSE_BETWEEN seconds (default 5) and restarts.
+# Loops the proto-os MICRO kernel. Between each iteration the screen is
+# cleared, a short banner explains what to look for, and the demo runs
+# for DEMO_DURATION seconds (default 20) before the loop pauses
+# PAUSE_BETWEEN seconds (default 5) and restarts.
 #
-# Stop with Ctrl+C. Skip to the next iteration with Ctrl+A then X
-# (which exits the QEMU instance; the loop will restart it).
+# Stop with Ctrl+C. Skip to the next iteration with Ctrl+A then X.
 #
 # Offline-safe — no apt, no network. setup_pi.sh must have been run
-# once previously to install qemu-system-arm and build the kernel.
+# once previously to install dependencies and build the kernel.
 #
-# Defaults to TCG accel (KVM did not run on this Pi). To try KVM later,
-# set ACCEL=kvm CPU=host before running:
-#     ACCEL=kvm CPU=host ./run_demo.sh
+# Optional environment overrides:
+#   DEMO_DURATION  seconds per iteration (default 20)
+#   PAUSE_BETWEEN  seconds between iterations (default 5)
+#   ACCEL          QEMU accelerator. Unset = QEMU's default. Set to
+#                  'kvm' to try hardware acceleration (requires CPU=host).
+#   CPU            guest CPU model (default cortex-a57; use 'host' with KVM)
 
 set -euo pipefail
 
@@ -23,9 +25,9 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 MAKE_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
 KERNEL_ELF="$MAKE_DIR/build/kernel.elf"
 
-DEMO_DURATION="${DEMO_DURATION:-15}"
+DEMO_DURATION="${DEMO_DURATION:-20}"
 PAUSE_BETWEEN="${PAUSE_BETWEEN:-5}"
-ACCEL="${ACCEL:-tcg}"
+ACCEL="${ACCEL:-}"
 CPU="${CPU:-cortex-a57}"
 
 if [ ! -f "$KERNEL_ELF" ]; then
@@ -44,37 +46,36 @@ print_banner() {
   clear
   cat <<'EOF'
 ================================================================
-  proto-os MICRO demo  (QEMU virt cortex-a57 on Raspberry Pi 4)
+  proto-os — microkernel fault isolation demo
 ================================================================
-  Watch for, in order:
-    BOOT
-    [boot] proto-os (MICRO)              kernel boot, MICRO flavour
-    [uart] ready                         user-space UART server up
-    [sup] ready                          supervisor task up
-    A                                    visible writer task (task_a)
-    [fault] task_b dead esr=0xf2...      task_b deliberately crashes
-    [sup] restarted uart                 supervisor restarts the service
-    [uart] ready                         service back up, no reboot
-    A continues                          uninterrupted recovery
-
-  Loop runs for ~15s, pauses ~5s, restarts. Ctrl+C to stop.
+  Watch for:
+    [fault] task_b dead     uart_server crashes on purpose
+    [sup] restarted uart    supervisor brings the service back up
+    A continues             service restored without a reboot
 ================================================================
 
 EOF
-  sleep 2
 }
 
 run_once() {
-  timeout "$DEMO_DURATION" qemu-system-aarch64 \
-    -M virt \
-    -cpu "$CPU" \
-    -m 512M \
-    -nographic \
-    -serial stdio \
-    -monitor none \
-    -accel "$ACCEL" \
-    -kernel "$KERNEL_ELF" \
-    || true
+  local args=(-M virt -cpu "$CPU" -m 512M -nographic
+              -serial stdio -monitor none
+              -kernel "$KERNEL_ELF")
+  if [ -n "$ACCEL" ]; then
+    args+=(-accel "$ACCEL")
+  fi
+
+  set +e
+  timeout "$DEMO_DURATION" qemu-system-aarch64 "${args[@]}"
+  local rc=$?
+  set -e
+
+  # rc 124 = timeout killed it (expected); rc 0 = clean exit; anything
+  # else is a real qemu failure worth showing.
+  if [ "$rc" -ne 0 ] && [ "$rc" -ne 124 ] && [ "$rc" -ne 143 ]; then
+    echo
+    echo "(qemu exited rc=$rc — see any error text above)"
+  fi
 }
 
 trap 'echo; echo "demo loop stopped"; exit 0' INT TERM
