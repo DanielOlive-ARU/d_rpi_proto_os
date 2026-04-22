@@ -24,6 +24,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 MAKE_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
 KERNEL_ELF="$MAKE_DIR/build/kernel.elf"
+PRESENTER="$SCRIPT_DIR/presenter.py"
 
 DEMO_DURATION="${DEMO_DURATION:-20}"
 PAUSE_BETWEEN="${PAUSE_BETWEEN:-5}"
@@ -39,6 +40,17 @@ fi
 if ! command -v qemu-system-aarch64 >/dev/null 2>&1; then
   echo "ERROR: qemu-system-aarch64 not installed." >&2
   echo "Run setup_pi.sh first (requires internet)." >&2
+  exit 1
+fi
+
+if ! command -v python3 >/dev/null 2>&1; then
+  echo "ERROR: python3 not found (required by the presenter layer)." >&2
+  echo "On Raspberry Pi OS Lite it should be preinstalled; run 'sudo apt install python3'." >&2
+  exit 1
+fi
+
+if [ ! -f "$PRESENTER" ]; then
+  echo "ERROR: presenter not found at $PRESENTER" >&2
   exit 1
 fi
 
@@ -65,12 +77,20 @@ run_once() {
     args+=(-accel "$ACCEL")
   fi
 
-  # --foreground keeps qemu in the same process group so it retains
-  # foreground TTY access. Without it, qemu's -serial stdio output is
-  # silently dropped because timeout puts the child in its own group.
+  # --foreground keeps timeout (and therefore qemu) in the same process
+  # group as the shell, so signals propagate cleanly through the pipe
+  # into presenter.py. The serial stream flows qemu -> pipe -> presenter
+  # -> tty; when timeout kills qemu, qemu closes stdout, presenter sees
+  # EOF and exits naturally.
   set +e
-  timeout --foreground "$DEMO_DURATION" qemu-system-aarch64 "${args[@]}"
-  local rc=$?
+  timeout --foreground "$DEMO_DURATION" qemu-system-aarch64 "${args[@]}" \
+    | python3 "$PRESENTER"
+  # Snapshot PIPESTATUS into a local array in one step — any simple
+  # command after the pipeline (including ``local rc=...``) overwrites
+  # PIPESTATUS, so both elements must be captured atomically.
+  local pipestat=("${PIPESTATUS[@]}")
+  local rc=${pipestat[0]}
+  local pres_rc=${pipestat[1]}
   set -e
 
   # Clear immediately to wipe qemu's 'terminating on signal' line and
@@ -84,6 +104,10 @@ run_once() {
   if [ "$rc" -ne 0 ] && [ "$rc" -ne 124 ] && [ "$rc" -ne 143 ]; then
     echo
     echo "(demo exited rc=$rc)"
+  fi
+  if [ "$pres_rc" -ne 0 ]; then
+    echo
+    echo "(presenter exited rc=$pres_rc)"
   fi
 }
 
