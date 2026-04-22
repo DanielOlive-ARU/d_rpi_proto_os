@@ -107,6 +107,14 @@ trap 'echo; echo "demo loop stopped"; exit 0' INT TERM
 # anyone who had tuned it previously.
 export DEMO_POSTROLL="${DEMO_POSTROLL:-$PAUSE_BETWEEN}"
 
+# If the caller requested a counter reset, honour it once at the top of
+# the loop and then unset so subsequent iterations keep accumulating
+# instead of each one resetting to zero.
+if [ "${DEMO_RESET_COUNTERS:-}" = "1" ]; then
+  rm -f "$SCRIPT_DIR/.state/counters.json"
+  unset DEMO_RESET_COUNTERS
+fi
+
 while true; do
   python3 "$PRESENTER" preroll
   run_once

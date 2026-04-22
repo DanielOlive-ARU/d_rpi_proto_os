@@ -12,12 +12,16 @@ Three subcommands share chrome, color rules, and signal handling:
                             with a countdown before looping.
 
 Environment:
-  DEMO_PLAIN       if '1', force plain pass-through (no ANSI, no chrome).
-                   slide modes become no-ops when plain.
-  NO_COLOR         any non-empty value disables color.
-  DEMO_NO_FRAME    if '1', disable framing in live mode (still colorizes).
-  DEMO_PREROLL     integer seconds for preroll slide (default 3).
-  DEMO_POSTROLL    integer seconds for postroll slide (default 5).
+  DEMO_PLAIN            if '1', force plain pass-through (no ANSI, no chrome).
+                        slide modes become no-ops when plain.
+  NO_COLOR              any non-empty value disables color.
+  DEMO_NO_FRAME         if '1', disable framing in live mode (still colorizes).
+  DEMO_PREROLL          integer seconds for preroll slide (default 3).
+  DEMO_POSTROLL         integer seconds for postroll slide (default 5).
+  DEMO_STATE_FILE       path to the cross-iteration counter file
+                        (default ``<presenter_dir>/.state/counters.json``).
+  DEMO_RESET_COUNTERS   if '1', ignore any existing state and start counting
+                        from zero for this invocation.
 
 Exit codes:
   0  stdin EOF (live), slide hold elapsed (preroll/postroll),
@@ -26,12 +30,15 @@ Exit codes:
 """
 
 import collections
+import datetime
+import json
 import os
 import re
 import signal
 import sys
 import time
-from typing import Deque, List, Optional, Tuple
+from pathlib import Path
+from typing import Any, Deque, Dict, List, Optional, Tuple
 
 
 # Force UTF-8 stdout so box-drawing, em-dash, and arrow characters render
@@ -135,17 +142,120 @@ def _detect_size() -> Tuple[int, int]:
         return 24, 80
 
 
+# ----- cross-iteration counter state ----------------------------------------
+
+# All three subcommands read this state file; live mode is the only
+# writer. The schema is intentionally minimal — kept JSON so it's
+# inspectable by hand during the expo.
+#
+#   schema: int (always 1)
+#   started_at_iso: ISO 8601 UTC — when counting began
+#   iterations: int — completed live-mode runs (qemu actually emitted output)
+#   faults_seen: int — ``[fault]`` kernel lines observed across all iterations
+#   restarts_seen: int — ``[sup] restarted`` lines observed across all iterations
+#   last_iteration_iso: ISO 8601 UTC or null — timestamp of most recent EOF
+
+_STATE_SCHEMA = 1
+
+
+def _iso_now() -> str:
+    return datetime.datetime.now(datetime.timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def _default_state() -> Dict[str, Any]:
+    return {
+        "schema": _STATE_SCHEMA,
+        "started_at_iso": _iso_now(),
+        "iterations": 0,
+        "faults_seen": 0,
+        "restarts_seen": 0,
+        "last_iteration_iso": None,
+    }
+
+
+def _state_file() -> Path:
+    override = os.environ.get("DEMO_STATE_FILE", "").strip()
+    if override:
+        return Path(override)
+    return Path(__file__).resolve().parent / ".state" / "counters.json"
+
+
+def _load_state() -> Dict[str, Any]:
+    if os.environ.get("DEMO_RESET_COUNTERS", "").strip() == "1":
+        return _default_state()
+    path = _state_file()
+    try:
+        raw = path.read_text(encoding="utf-8")
+        parsed = json.loads(raw)
+        if not isinstance(parsed, dict):
+            raise ValueError("state file is not a JSON object")
+        merged = _default_state()
+        for k in ("iterations", "faults_seen", "restarts_seen"):
+            if k in parsed:
+                merged[k] = int(parsed[k])
+        for k in ("started_at_iso", "last_iteration_iso"):
+            if k in parsed and parsed[k]:
+                merged[k] = str(parsed[k])
+        merged["schema"] = _STATE_SCHEMA
+        return merged
+    except (FileNotFoundError, OSError, ValueError, json.JSONDecodeError):
+        return _default_state()
+
+
+def _save_state(state: Dict[str, Any]) -> None:
+    path = _state_file()
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps(state, indent=2), encoding="utf-8")
+        os.replace(tmp, path)
+    except OSError:
+        # Non-fatal: the demo still runs, stats just don't persist
+        # across invocations. Silent to avoid cluttering the display.
+        pass
+
+
+def _format_counters(state: Optional[Dict[str, Any]]) -> str:
+    if state is None:
+        return ""
+    it = int(state.get("iterations", 0))
+    rs = int(state.get("restarts_seen", 0))
+    if it <= 0 and rs <= 0:
+        return ""
+    return f"iter {it} \u00b7 restarts {rs}"
+
+
+def _format_counters_long(state: Optional[Dict[str, Any]]) -> str:
+    if state is None:
+        return ""
+    it = int(state.get("iterations", 0))
+    fs = int(state.get("faults_seen", 0))
+    rs = int(state.get("restarts_seen", 0))
+    return (
+        f"Session totals: {it} iteration{'' if it == 1 else 's'} \u00b7 "
+        f"{fs} fault{'' if fs == 1 else 's'} caught \u00b7 "
+        f"{rs} restart{'' if rs == 1 else 's'} successful"
+    )
+
+
 # ----- shared chrome drawing ------------------------------------------------
 
 
-def _draw_title_bar(out, cols: int) -> None:
+def _draw_title_bar(out, cols: int, state: Optional[Dict[str, Any]] = None) -> None:
+    # Row 1 — centered inverse-video title
     title = _TITLE[:cols] if len(_TITLE) > cols else _TITLE
     pad_left = max(0, (cols - len(title)) // 2)
     pad_right = max(0, cols - pad_left - len(title))
     out.write(_goto(1, 1) + _INVERSE)
     out.write(" " * pad_left + title + " " * pad_right)
     out.write(_RESET)
-    out.write(_goto(2, 1) + " " * cols)
+    # Row 2 — blank, or right-aligned dim counter subtitle if state given
+    counters = _format_counters(state)
+    if counters and len(counters) + 2 < cols:
+        pad = cols - len(counters) - 2
+        out.write(_goto(2, 1) + " " * pad + _DIM + counters + _RESET + "  ")
+    else:
+        out.write(_goto(2, 1) + " " * cols)
 
 
 def _draw_outer_frame(out, rows: int, cols: int, embedded_title: str = "") -> None:
@@ -193,24 +303,35 @@ def _colorize_free(line: str) -> str:
 # ----- live mode chrome -----------------------------------------------------
 
 
+_FAULT_LINE = re.compile(r"^\[fault\]")
+_RESTART_LINE = re.compile(r"^\[sup\] restarted")
+
+
 class Chrome:
     """Full-screen framed layout for the live qemu log.
 
     Layout (1-indexed, as ANSI expects):
       row 1:         inverse-video title bar
-      row 2:         blank separator
+      row 2:         right-aligned dim stats subtitle (or blank)
       row 3:         frame top with embedded "live kernel log" title
       rows 4..R-1:   framed log content
       row R:         frame bottom
+
+    Also maintains the cross-iteration counter state. The constructor
+    loads the state file; ``on_line`` detects fault / restart markers
+    and bumps the counters in memory; ``teardown`` writes the updated
+    state back if the iteration actually produced output.
     """
 
-    def __init__(self, color: bool) -> None:
+    def __init__(self, color: bool, state: Dict[str, Any]) -> None:
         self.color = color
         self.stdout = sys.stdout
         self.rows, self.cols = _detect_size()
         self._recompute_layout()
         self.log_lines: Deque[str] = collections.deque(maxlen=self.content_height)
         self._resize_pending = False
+        self.state = state
+        self._saw_any_line = False
 
     def _recompute_layout(self) -> None:
         self.content_height = max(1, self.rows - 4)
@@ -235,6 +356,11 @@ class Chrome:
         self.stdout.flush()
 
     def teardown(self) -> None:
+        # Persist cross-iteration counters if this iteration actually ran.
+        if self._saw_any_line:
+            self.state["iterations"] = int(self.state.get("iterations", 0)) + 1
+            self.state["last_iteration_iso"] = _iso_now()
+            _save_state(self.state)
         self.stdout.write(_SHOW_CURSOR)
         self.stdout.write(_ALT_SCREEN_OFF)
         self.stdout.flush()
@@ -242,8 +368,11 @@ class Chrome:
     def _erase_and_draw_static(self) -> None:
         out = self.stdout
         out.write(_CLEAR)
-        _draw_title_bar(out, self.cols)
+        _draw_title_bar(out, self.cols, self.state)
         _draw_outer_frame(out, self.rows, self.cols, embedded_title=_FRAME_TITLE_LIVE)
+
+    def _redraw_title(self) -> None:
+        _draw_title_bar(self.stdout, self.cols, self.state)
 
     def _fit_content(self, raw: str) -> str:
         stripped = raw.rstrip("\r\n")
@@ -272,8 +401,23 @@ class Chrome:
         if self._resize_pending:
             self._resize_pending = False
             self._apply_resize()
-        self.log_lines.append(raw.rstrip("\r\n"))
+
+        stripped = raw.rstrip("\r\n")
+        state_changed = False
+        if _FAULT_LINE.match(stripped):
+            self.state["faults_seen"] = int(self.state.get("faults_seen", 0)) + 1
+            state_changed = True
+        if _RESTART_LINE.match(stripped):
+            self.state["restarts_seen"] = int(self.state.get("restarts_seen", 0)) + 1
+            state_changed = True
+
+        self._saw_any_line = True
+        self.log_lines.append(stripped)
         self._draw_content()
+        if state_changed:
+            # Bump the visible subtitle; cheap — 2 rows of redraw.
+            self._redraw_title()
+            self.stdout.flush()
 
 
 # ----- slide content --------------------------------------------------------
@@ -341,10 +485,21 @@ def _visible_len(s: str) -> int:
     return len(re.sub(r"\x1b\[[0-9;?]*[A-Za-z]", "", s))
 
 
-def _render_slide(body: List[str], footer_template: str, duration: int, color: bool) -> int:
+def _render_slide(
+    body: List[str],
+    footer_template: str,
+    duration: int,
+    color: bool,
+    state: Optional[Dict[str, Any]] = None,
+    tail_line: Optional[str] = None,
+) -> int:
     """Draw the title bar + outer frame, then render `body` centered
     inside the content area, with a live countdown footer. Holds for
-    `duration` seconds. Restores cursor and clears the screen on exit."""
+    `duration` seconds. Restores cursor and clears the screen on exit.
+
+    If ``state`` is provided, the stats subtitle is rendered on row 2.
+    If ``tail_line`` is provided, it is rendered at the bottom of the
+    body block (after a spacer row), centered on its own visible length."""
     rows, cols = _detect_size()
     out = sys.stdout
 
@@ -362,7 +517,7 @@ def _render_slide(body: List[str], footer_template: str, duration: int, color: b
 
     out.write(_HIDE_CURSOR)
     out.write(_CLEAR)
-    _draw_title_bar(out, cols)
+    _draw_title_bar(out, cols, state)
     _draw_outer_frame(out, rows, cols)
 
     # Block-level horizontal centering — use the widest body line so that
@@ -380,6 +535,14 @@ def _render_slide(body: List[str], footer_template: str, duration: int, color: b
             line = line[:content_width]
         colored = _colorize_slide_line(line, color)
         out.write(_goto(row, 3 + block_left_pad) + colored)
+
+    # Optional tail line rendered on its own row below the body, centered.
+    if tail_line:
+        tail_row = content_top + top_pad + len(visible_body) + 1
+        if tail_row < content_bottom:
+            visible = _visible_len(tail_line)
+            pad_left = max(0, (content_width - visible) // 2)
+            out.write(_goto(tail_row, 3 + pad_left) + _DIM + tail_line + _RESET)
 
     # Footer countdown
     footer_row = content_bottom
@@ -428,12 +591,14 @@ def _install_signal_handlers(chrome: Optional[Chrome]) -> None:
 def cmd_live() -> int:
     color = _color_enabled()
     framed = _frame_enabled()
+    state = _load_state()
 
-    chrome = Chrome(color=color) if framed else None
+    chrome = Chrome(color=color, state=state) if framed else None
     _install_signal_handlers(chrome)
 
     stdin_bin = sys.stdin.buffer
     stdout = sys.stdout
+    saw_any_line = False
 
     if chrome is not None:
         chrome.setup()
@@ -444,14 +609,25 @@ def cmd_live() -> int:
             if not raw:
                 break
             line = raw.decode("utf-8", errors="replace")
+            saw_any_line = True
             if chrome is not None:
                 chrome.on_line(line)
             else:
+                stripped = line.rstrip("\r\n")
+                if _FAULT_LINE.match(stripped):
+                    state["faults_seen"] = int(state.get("faults_seen", 0)) + 1
+                if _RESTART_LINE.match(stripped):
+                    state["restarts_seen"] = int(state.get("restarts_seen", 0)) + 1
                 stdout.write(_colorize_free(line) if color else line)
                 stdout.flush()
     finally:
         if chrome is not None:
             chrome.teardown()
+        elif saw_any_line:
+            # Non-framed path: still persist counter increments.
+            state["iterations"] = int(state.get("iterations", 0)) + 1
+            state["last_iteration_iso"] = _iso_now()
+            _save_state(state)
     return 0
 
 
@@ -460,11 +636,13 @@ def cmd_preroll() -> int:
         return 0
     _install_signal_handlers(None)
     duration = _env_int("DEMO_PREROLL", 3)
+    state = _load_state()
     return _render_slide(
         body=_PREROLL_BODY,
         footer_template="starting in {n} second{s}...",
         duration=duration,
         color=_color_enabled(),
+        state=state,
     )
 
 
@@ -473,11 +651,17 @@ def cmd_postroll() -> int:
         return 0
     _install_signal_handlers(None)
     duration = _env_int("DEMO_POSTROLL", 5)
+    state = _load_state()
+    # Show session totals underneath the recap body so the evidence of
+    # accumulated successful restarts is visible at every iteration end.
+    tail = _format_counters_long(state) if int(state.get("iterations", 0)) > 0 else None
     return _render_slide(
         body=_POSTROLL_BODY,
         footer_template="next run in {n} second{s}...",
         duration=duration,
         color=_color_enabled(),
+        state=state,
+        tail_line=tail,
     )
 
 

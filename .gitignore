@@ -1,2 +1,4 @@
 /proto-os/build/
 /proto-os/results/
+/proto-os/pi4/demo/.state/
+/proto-os/pi4/demo/__pycache__/
