@@ -14,7 +14,7 @@ M11 adds the minimum instrumentation needed to measure:
 
 The core architecture does not change:
 
-- `BENCH_MODE=OFF` preserves the normal M10 demo behavior
+- `BENCH_MODE=OFF` preserves the normal boot path (fault injection is opt-in via `FAULT_DEMO=ON`)
 - timer IRQs stay enabled
 - IPC remains static-endpoint, fixed-size, kernel-copy
 - no per-task address spaces are introduced
@@ -22,8 +22,8 @@ The core architecture does not change:
 ## Benchmark Modes
 
 - `BENCH_MODE=OFF`
-  - normal M10 demo output
-  - MICRO still injects the one-shot `task_b` crash and supervisor restart
+  - normal boot output; default builds do not inject any fault
+  - the one-shot `task_b` crash and supervisor restart require `FAULT_DEMO=ON` (MICRO only)
 - `BENCH_MODE=LATENCY`
   - `task_a` runs the latency benchmarks
   - `task_b` remains the UART server

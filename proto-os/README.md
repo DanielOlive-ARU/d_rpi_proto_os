@@ -41,12 +41,12 @@ Prototype AArch64 OS for a dissertation comparing monolithic and microkernel sty
   - MICRO: EL0 `SYS_write` (except `task_b` uart_server) is routed via IPC to `EP_UART=1`
   - `task_b` runs a user-space uart_server loop and prints one-time `[uart] ready`
   - PL011 remains kernel-mediated (not mapped into EL0)
-- M10: MICRO fault isolation + recovery demo:
+- M10: MICRO fault isolation + supervised recovery:
   - adds supervisor task `task_c` in EL0 (`[sup] ready`)
-  - `task_b` (`uart_server`) intentionally crashes once via `brk #0`
-  - kernel fault path marks task dead, cleans IPC state, notifies supervisor
+  - kernel fault path marks a crashed task dead, cleans IPC state, notifies supervisor
   - supervisor restarts `task_b` and logs `[sup] restarted uart`
   - service resumes without reboot (`[uart] ready` appears again in MICRO)
+  - fault injection (one-time `brk #0` in `task_b`) is opt-in via `FAULT_DEMO=ON`; default builds boot clean
 
 Full process isolation, capability model, and service split are staged for later milestones.
 
@@ -90,10 +90,17 @@ make micro-qemu
 
 Expected output is otherwise the same, with:
 - `[boot] proto-os (MICRO)`
-- plus one-time recovery markers:
-  - fault line for crashed `task_b`
-  - `[sup] restarted uart`
-  - second `[uart] ready` after restart
+
+To demonstrate fault isolation and supervised restart (MICRO only):
+
+```bash
+make fault-demo-qemu
+```
+
+This adds one-time recovery markers:
+- fault line for the intentionally crashed `task_b`
+- `[sup] restarted uart`
+- second `[uart] ready` after restart
 
 ## Debug
 ```bash

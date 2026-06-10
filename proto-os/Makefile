@@ -11,6 +11,7 @@ CONFIG_STAMP := $(BUILD_DIR)/.build_config
 
 KERNEL_FLAVOR ?= MONO
 BENCH_MODE ?= OFF
+FAULT_DEMO ?= OFF
 DEBUG_TICK ?= 1
 DEBUG_EARLY ?= 0
 
@@ -37,6 +38,27 @@ else
 $(error Unsupported BENCH_MODE=$(BENCH_MODE))
 endif
 
+# Convenience targets re-invoke make with explicit flags and are validated
+# in that sub-make; every other goal (build, direct artifact paths) is
+# validated here. kernel/include/kernel/config.h enforces the same rules
+# with #error as a compile-time backstop.
+SUBMAKE_GOALS := mono-qemu micro-qemu fault-demo-qemu bench-mono-qemu bench-micro-qemu recovery-micro-qemu clean
+VALIDATED_GOALS := $(filter-out $(SUBMAKE_GOALS),$(or $(MAKECMDGOALS),build))
+
+ifeq ($(FAULT_DEMO),ON)
+ifneq ($(VALIDATED_GOALS),)
+ifneq ($(BENCH_MODE),OFF)
+$(error FAULT_DEMO=ON requires BENCH_MODE=OFF)
+endif
+ifneq ($(KERNEL_FLAVOR),MICRO)
+$(error FAULT_DEMO=ON requires KERNEL_FLAVOR=MICRO; task_b receives no IPC traffic in MONO)
+endif
+endif
+CFLAGS += -DFAULT_DEMO_ON
+else ifneq ($(FAULT_DEMO),OFF)
+$(error Unsupported FAULT_DEMO=$(FAULT_DEMO))
+endif
+
 ASFLAGS := $(CFLAGS)
 LDFLAGS := -T kernel/arch/aarch64/linker.ld
 
@@ -45,21 +67,21 @@ SRCS_S := $(shell find kernel -name '*.S')
 OBJS := $(patsubst kernel/%.c,$(BUILD_DIR)/%.o,$(SRCS_C)) \
         $(patsubst kernel/%.S,$(BUILD_DIR)/%.o,$(SRCS_S))
 
-.PHONY: build clean mono-qemu micro-qemu bench-mono-qemu bench-micro-qemu recovery-micro-qemu config-check
+.PHONY: build clean mono-qemu micro-qemu fault-demo-qemu bench-mono-qemu bench-micro-qemu recovery-micro-qemu config-check
 
 build: config-check $(KERNEL_ELF) $(KERNEL_IMG)
 
 config-check:
 	@mkdir -p $(BUILD_DIR)
-	@if [ ! -f $(CONFIG_STAMP) ] || [ "$$(cat $(CONFIG_STAMP))" != "$(KERNEL_FLAVOR):$(BENCH_MODE)" ]; then \
+	@if [ ! -f $(CONFIG_STAMP) ] || [ "$$(cat $(CONFIG_STAMP))" != "$(KERNEL_FLAVOR):$(BENCH_MODE):$(FAULT_DEMO)" ]; then \
 		rm -rf $(BUILD_DIR); \
 		mkdir -p $(BUILD_DIR); \
-		printf "%s\n" "$(KERNEL_FLAVOR):$(BENCH_MODE)" > $(CONFIG_STAMP); \
+		printf "%s\n" "$(KERNEL_FLAVOR):$(BENCH_MODE):$(FAULT_DEMO)" > $(CONFIG_STAMP); \
 	fi
 
 $(CONFIG_STAMP):
 	@mkdir -p $(BUILD_DIR)
-	@printf "%s\n" "$(KERNEL_FLAVOR):$(BENCH_MODE)" > $@
+	@printf "%s\n" "$(KERNEL_FLAVOR):$(BENCH_MODE):$(FAULT_DEMO)" > $@
 
 $(BUILD_DIR)/el0/user_tasks.o: CFLAGS += -ffixed-x30
 
@@ -85,19 +107,23 @@ micro-qemu:
 	$(MAKE) KERNEL_FLAVOR=MICRO BENCH_MODE=OFF build
 	./scripts/run_qemu.sh
 
+fault-demo-qemu:
+	$(MAKE) KERNEL_FLAVOR=MICRO BENCH_MODE=OFF FAULT_DEMO=ON build
+	./scripts/run_qemu.sh
+
 bench-mono-qemu:
 	$(MAKE) clean
-	$(MAKE) KERNEL_FLAVOR=MONO BENCH_MODE=LATENCY build
+	$(MAKE) KERNEL_FLAVOR=MONO BENCH_MODE=LATENCY FAULT_DEMO=OFF build
 	PROTO_OS_SILENCE_WSL_WARNING=1 ./scripts/run_qemu.sh | stdbuf -o0 tr -d '\000'
 
 bench-micro-qemu:
 	$(MAKE) clean
-	$(MAKE) KERNEL_FLAVOR=MICRO BENCH_MODE=LATENCY build
+	$(MAKE) KERNEL_FLAVOR=MICRO BENCH_MODE=LATENCY FAULT_DEMO=OFF build
 	PROTO_OS_SILENCE_WSL_WARNING=1 ./scripts/run_qemu.sh | stdbuf -o0 tr -d '\000'
 
 recovery-micro-qemu:
 	$(MAKE) clean
-	$(MAKE) KERNEL_FLAVOR=MICRO BENCH_MODE=RECOVERY build
+	$(MAKE) KERNEL_FLAVOR=MICRO BENCH_MODE=RECOVERY FAULT_DEMO=OFF build
 	PROTO_OS_SILENCE_WSL_WARNING=1 ./scripts/run_qemu.sh | stdbuf -o0 tr -d '\000'
 
 clean:
