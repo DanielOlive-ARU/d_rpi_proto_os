@@ -38,9 +38,18 @@ else
 $(error Unsupported BENCH_MODE=$(BENCH_MODE))
 endif
 
+# Flag-combination checks apply only to goals that compile; convenience
+# targets re-invoke make with explicit flags and are validated there.
+BUILD_GOALS := $(filter build,$(or $(MAKECMDGOALS),build))
+
 ifeq ($(FAULT_DEMO),ON)
+ifneq ($(BUILD_GOALS),)
 ifneq ($(BENCH_MODE),OFF)
 $(error FAULT_DEMO=ON requires BENCH_MODE=OFF)
+endif
+ifneq ($(KERNEL_FLAVOR),MICRO)
+$(error FAULT_DEMO=ON requires KERNEL_FLAVOR=MICRO; task_b receives no IPC traffic in MONO)
+endif
 endif
 CFLAGS += -DFAULT_DEMO_ON
 else ifneq ($(FAULT_DEMO),OFF)
@@ -101,17 +110,17 @@ fault-demo-qemu:
 
 bench-mono-qemu:
 	$(MAKE) clean
-	$(MAKE) KERNEL_FLAVOR=MONO BENCH_MODE=LATENCY build
+	$(MAKE) KERNEL_FLAVOR=MONO BENCH_MODE=LATENCY FAULT_DEMO=OFF build
 	PROTO_OS_SILENCE_WSL_WARNING=1 ./scripts/run_qemu.sh | stdbuf -o0 tr -d '\000'
 
 bench-micro-qemu:
 	$(MAKE) clean
-	$(MAKE) KERNEL_FLAVOR=MICRO BENCH_MODE=LATENCY build
+	$(MAKE) KERNEL_FLAVOR=MICRO BENCH_MODE=LATENCY FAULT_DEMO=OFF build
 	PROTO_OS_SILENCE_WSL_WARNING=1 ./scripts/run_qemu.sh | stdbuf -o0 tr -d '\000'
 
 recovery-micro-qemu:
 	$(MAKE) clean
-	$(MAKE) KERNEL_FLAVOR=MICRO BENCH_MODE=RECOVERY build
+	$(MAKE) KERNEL_FLAVOR=MICRO BENCH_MODE=RECOVERY FAULT_DEMO=OFF build
 	PROTO_OS_SILENCE_WSL_WARNING=1 ./scripts/run_qemu.sh | stdbuf -o0 tr -d '\000'
 
 clean:

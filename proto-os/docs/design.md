@@ -34,7 +34,7 @@
   - switching occurs only at safe thread-context points
 - Three persistent EL0 tasks:
   - `task_a` calls `SYS_write("A\n")` periodically, then yields
-  - `task_b` runs `uart_server`: prints one-time `[uart] ready`, receives endpoint messages, writes payload, sends ACK reply; with `FAULT_DEMO=ON` it crashes once after its first reply (fault injection)
+  - `task_b` runs `uart_server`: prints one-time `[uart] ready`, receives endpoint messages, writes payload, sends ACK reply; with `FAULT_DEMO=ON` (or unconditionally in `BENCH_MODE=RECOVERY` builds) it crashes once after its first reply (fault injection)
   - `task_c` runs supervisor: prints one-time `[sup] ready`, waits for task-death notification, restarts `task_b`, logs `[sup] restarted uart`
 - Idle thread/path remains in EL1 and uses `WFI`.
 - Task states include `TASK_RUNNABLE`, `TASK_RUNNING`, `TASK_BLOCKED`, `TASK_DEAD`.

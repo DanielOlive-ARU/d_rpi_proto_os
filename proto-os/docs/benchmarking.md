@@ -14,7 +14,7 @@ M11 adds the minimum instrumentation needed to measure:
 
 The core architecture does not change:
 
-- `BENCH_MODE=OFF` preserves the normal M10 demo behavior
+- `BENCH_MODE=OFF` preserves the normal boot path (fault injection is opt-in via `FAULT_DEMO=ON`)
 - timer IRQs stay enabled
 - IPC remains static-endpoint, fixed-size, kernel-copy
 - no per-task address spaces are introduced
