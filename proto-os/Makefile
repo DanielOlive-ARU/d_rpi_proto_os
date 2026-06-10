@@ -38,12 +38,15 @@ else
 $(error Unsupported BENCH_MODE=$(BENCH_MODE))
 endif
 
-# Flag-combination checks apply only to goals that compile; convenience
-# targets re-invoke make with explicit flags and are validated there.
-BUILD_GOALS := $(filter build,$(or $(MAKECMDGOALS),build))
+# Convenience targets re-invoke make with explicit flags and are validated
+# in that sub-make; every other goal (build, direct artifact paths) is
+# validated here. kernel/include/kernel/config.h enforces the same rules
+# with #error as a compile-time backstop.
+SUBMAKE_GOALS := mono-qemu micro-qemu fault-demo-qemu bench-mono-qemu bench-micro-qemu recovery-micro-qemu clean
+VALIDATED_GOALS := $(filter-out $(SUBMAKE_GOALS),$(or $(MAKECMDGOALS),build))
 
 ifeq ($(FAULT_DEMO),ON)
-ifneq ($(BUILD_GOALS),)
+ifneq ($(VALIDATED_GOALS),)
 ifneq ($(BENCH_MODE),OFF)
 $(error FAULT_DEMO=ON requires BENCH_MODE=OFF)
 endif

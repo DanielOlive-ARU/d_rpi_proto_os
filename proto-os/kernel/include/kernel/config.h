@@ -43,6 +43,15 @@
 #define BENCH_MODE_STR "OFF"
 #endif
 
+/* Compile-time backstop for flag combinations the Makefile rejects;
+ * catches direct artifact builds that bypass make-level validation. */
+#if defined(FAULT_DEMO_ON) && !defined(BENCH_MODE_OFF)
+#error "FAULT_DEMO=ON requires BENCH_MODE=OFF"
+#endif
+#if defined(FAULT_DEMO_ON) && !defined(KERNEL_FLAVOR_MICRO)
+#error "FAULT_DEMO=ON requires KERNEL_FLAVOR=MICRO (task_b receives no IPC traffic in MONO)"
+#endif
+
 /* Future (inactive): user VA layout used once per-process TTBR0 mappings exist.
 #define USER_VA_BASE  0x40000000UL
 #define USER_VA_SIZE  0x00200000UL
