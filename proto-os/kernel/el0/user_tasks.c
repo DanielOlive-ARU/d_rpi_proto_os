@@ -36,7 +36,9 @@ static const char g_bench_cycles_field[] EL0_RODATA = " cycles=";
 static const char g_bench_cntfrq_field[] EL0_RODATA = " cntfrq_hz=";
 static const char g_bench_iterations_field[] EL0_RODATA = " iterations=";
 static const char g_bench_newline[] EL0_RODATA = "\n";
+#if defined(FAULT_DEMO_ON) || defined(BENCH_MODE_RECOVERY)
 static int g_uart_server_crashed_once EL0_DATA = 0;
+#endif
 
 static inline uint64_t el0_syscall2(uint64_t nr, uint64_t arg0, uint64_t arg1) {
   register uint64_t x0 asm("x0") = arg0;
@@ -501,7 +503,7 @@ void __el0_task_b_entry(void) {
     if (recv_len != (uint64_t)-1) {
       (void)el0_write_ret((const char *)recv_buf, recv_len);
       (void)el0_ipc_reply(EP_UART, recv_buf, 0);
-#ifndef BENCH_MODE_LATENCY
+#if defined(FAULT_DEMO_ON) || defined(BENCH_MODE_RECOVERY)
       if (!g_uart_server_crashed_once) {
         g_uart_server_crashed_once = 1;
         asm volatile("brk #0");

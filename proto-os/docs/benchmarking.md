@@ -22,8 +22,8 @@ The core architecture does not change:
 ## Benchmark Modes
 
 - `BENCH_MODE=OFF`
-  - normal M10 demo output
-  - MICRO still injects the one-shot `task_b` crash and supervisor restart
+  - normal boot output; default builds do not inject any fault
+  - the one-shot `task_b` crash and supervisor restart require `FAULT_DEMO=ON` (MICRO only)
 - `BENCH_MODE=LATENCY`
   - `task_a` runs the latency benchmarks
   - `task_b` remains the UART server

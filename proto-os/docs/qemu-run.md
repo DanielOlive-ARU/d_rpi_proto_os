@@ -33,12 +33,20 @@ Expected runtime output includes:
 - `[tick] 1000` heartbeat
 - recurring `A` marker from EL0 writer task
 
-MICRO-only M10 recovery markers:
+Fault-injection demo (MICRO only), opt-in via `FAULT_DEMO=ON`:
+
+```bash
+make fault-demo-qemu
+```
+
+This adds one-time recovery markers on top of the MICRO output:
 - one EL0 fault line when `task_b` is intentionally crashed
 - one-time `[sup] restarted uart`
 - second `[uart] ready` after restart
 
-MONO behavior at M10:
+Default builds (`FAULT_DEMO=OFF`) boot clean with no fault or restart markers.
+
+MONO behavior:
 - no restart marker
 - `task_b` and `task_c` remain blocked after their startup lines
 
